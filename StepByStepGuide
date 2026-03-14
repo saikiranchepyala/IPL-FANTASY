@@ -1,0 +1,188 @@
+Here's the complete step-by-step implementation guide, in exact order.
+
+Phase 1 — Firebase Setup
+Step 1 — Create the project
+
+Go to console.firebase.google.com
+Click "Add project"
+Name it ipl-fantasy-league → click Continue
+Toggle off Google Analytics → click Create project
+Wait ~10 seconds → click Continue
+
+Step 2 — Create the Firestore database
+
+In the left sidebar → click Build → Firestore Database
+Click "Create database"
+Select "Start in test mode" → click Next
+Region: select asia-south1 (Mumbai) → click Enable
+Wait for it to finish — you'll see an empty database screen
+
+Step 3 — Fix the security rules
+
+Inside Firestore, click the "Rules" tab at the top
+Delete everything in the editor and paste this:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+
+Click "Publish"
+
+Step 4 — Get your Firebase config
+
+Click the gear icon ⚙️ (top left, next to "Project Overview") → Project settings
+Scroll down to "Your apps" section
+Click the </> Web icon
+Nickname: type anything (e.g. ipl-web) → click "Register app"
+You'll see a code block — copy these 6 values and keep them somewhere:
+
+apiKey
+authDomain
+projectId
+storageBucket
+messagingSenderId
+appId
+
+Phase 2 — Configure the HTML File
+Step 5 — Edit the file
+
+Download ipl-fantasy-v4.html
+Open it in a text editor
+
+Windows: right-click → Open with → Notepad
+Mac: right-click → Open with → TextEdit → then Format → Make Plain Text
+Recommended: VS Code if you have it
+
+
+At the very top of the <script> block, find this section:
+
+jsconst FIREBASE_CONFIG = {
+  apiKey:            "REPLACE_apiKey",
+  authDomain:        "REPLACE_authDomain",
+  projectId:         "REPLACE_projectId",
+  storageBucket:     "REPLACE_storageBucket",
+  messagingSenderId: "REPLACE_messagingSenderId",
+  appId:             "REPLACE_appId"
+};
+
+Replace each REPLACE_* with your actual values from Step 4
+Save the file (Ctrl+S on Windows, Cmd+S on Mac)
+
+
+Phase 3 — Deploy
+Step 6 — Deploy to Netlify
+
+Go to app.netlify.com/drop
+Drag and drop your saved ipl-fantasy-v4.html file onto the page
+Wait ~5 seconds — you'll get a live URL like sunny-dolphin-abc123.netlify.app
+Open that URL — you should see the IPL Fantasy login screen
+Optional: click "Site configuration" → "Change site name" to get something like sai-ipl-fantasy.netlify.app
+
+
+✅ If you see the login screen, Firebase is connected and working.
+
+
+Phase 4 — First Time Admin Setup
+Step 7 — Log in as admin
+
+Open your Netlify URL
+Click "Admin" tab on the login screen
+Enter PIN: 0000 (the default)
+You're in the admin panel
+
+Step 8 — Change your admin PIN
+
+Go to League Setup tab (top right of admin panel)
+In the Admin PIN field, replace 0000 with your own 4-digit PIN
+Click Save
+Remember this PIN — it's the only way back into the admin panel
+
+Step 9 — Generate the join link
+
+Still in the League Setup tab
+Click "Generate Join Link"
+You'll see a 6-character code like IPL4X7 and a full link
+Click Copy
+Send this link to your friends on WhatsApp — this is how they register
+
+
+Phase 5 — Get Cricket API Key
+Step 10 — Sign up for CricketData.org
+
+Go to cricketdata.org
+Click Sign Up — free, no credit card needed
+Verify your email
+Log in → go to your Dashboard
+Copy your API key
+
+Step 11 — Save the API key in the app
+
+Go to admin panel → Current Match tab
+In the CricketAPI section, paste your API key into the field
+Click "Save Key"
+
+
+Phase 6 — GitHub
+Step 12 — Create the repository
+
+Go to github.com → click "New" (green button)
+Repository name: ipl-fantasy-league
+Set visibility to Private ← important, your Firebase keys are in the HTML file
+Leave everything else as default → click "Create repository"
+
+Step 13 — Push the files
+Open a terminal in the folder where your files are and run:
+bashgit init
+git add ipl-fantasy-v4.html README.md
+git commit -m "Initial commit — IPL Fantasy League v4"
+git remote add origin https://github.com/YOUR_USERNAME/ipl-fantasy-league.git
+git branch -M main
+git push -u origin main
+Replace YOUR_USERNAME with your actual GitHub username.
+
+Phase 7 — Match Day Flow
+Step 14 — Morning of the match
+
+Log into admin panel
+Go to Current Match tab
+Fill in Match Label (e.g. MI vs CSK — Match 1) and the two team names
+Click "+ Create New Match"
+Click "Find IPL Matches" → select today's match from the list
+Playing XI auto-loads into the player pool
+Share the league URL with your friends so they can pick their teams
+
+Step 15 — Before toss (~30 min)
+
+Check that everyone has submitted — you'll see ✓ next to each name in the submissions list
+Click "🔒 Lock Teams" → confirm
+No one can edit their team after this
+
+Step 16 — At the toss
+
+The moment the toss is announced on TV, click "🥁 TOSS DONE — REVEAL!" → confirm
+Everyone's screen instantly flips to the leaderboard showing all teams
+
+Step 17 — During the match
+
+Go to Player Stats tab
+Select 5 min from the auto-refresh dropdown
+Click the ⏸ OFF button — it turns 🟢 ON
+Stats fetch automatically every 5 minutes and points update live for everyone
+After each innings, manually check and fix any missing catches, stumpings, or run-outs
+
+Step 18 — After the match
+
+Click "⚡ Fetch Now" one final time for complete stats
+Manually fix any fielding stats the API missed
+Click "✅ Finalize & Save to Season" → confirm
+Points are permanently saved to the season leaderboard
+Click "+ Start Next Match" when you're ready for the next game
+
+
+Troubleshooting
+ProblemFix"Firebase Not Configured" screenRe-open the HTML file, check all 6 REPLACE_* values were replaced, re-save, re-upload to NetlifyFirestore permission denied errorFirebase Console → Firestore → Rules → make sure you did Step 3 and clicked PublishPlayers not loading from APITry after the official toss — playing XI isn't always available before match day morningSomeone forgot their PINAsk them to re-register with the same join link using the same name and a new PIN — it overwritesAuto-refresh stopsIt only runs while your admin browser tab is open — keep your screen active during the matchStats look wrong after auto-fetchManually correct them in the Player Stats grid — your edits override the API
