@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPL Fantasy League</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script type="module">
+
+// ═══════════════════════════════════════════════
+//  ONLY EDIT THIS — paste your Firebase config
+// ═══════════════════════════════════════════════
+const FIREBASE_CONFIG = {
+  apiKey:            "REPLACE_apiKey",
+  authDomain:        "REPLACE_authDomain",
+  projectId:         "REPLACE_projectId",
+  storageBucket:     "REPLACE_storageBucket",
+  messagingSenderId: "REPLACE_messagingSenderId",
+  appId:             "REPLACE_appId"
+};
+// ═══════════════════════════════════════════════
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, getDocs, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ─────────────────────────────────────────────
+//  DATA MODEL (Firestore structure)
+//
+//  /meta/game          — current match state
+//  /meta/members       — { name: { pin, teamName } }
+//  /matches/{matchId}  — { label, teams:{t1,t2}, status, players[], stats:{}, revealed, locked, finalized, matchNum }
+//  /season/totals      — { memberName: { total, matches:[{matchId,label,pts}] } }
+// ─────────────────────────────────────────────
+
+// ── Points calculator ──
+function calcPoints(s) {
+  if (!s) return 0;
+  let p = 0;
+  const runs=s.runs||0, balls=s.balls||0, wkts=s.wickets||0, overs=s.overs||0;
+  p += runs + (s.fours||0) + (s.sixes||0)*2;
+  if (runs>=100) p+=16; else if (runs>=50) p+=8; else if (runs>=30) p+=4;
+  if (s.batted && runs===0) p-=2;
+  if (balls>=10) { const sr=runs/balls*100; if(sr>=170)p+=6;else if(sr>=150)p+=4;else if(sr>=130)p+=2;else if(sr<50)p-=6;else if(sr<60)p-=4;else if(sr<70)p-=2; }
+  p += wkts*25 + (s.maidens||0)*8;
+  if (wkts>=5) p+=16; else if (wkts>=4) p+=8; else if (wkts>=3) p+=4;
+  p += (s.lbwBowled||0)*8;
+  if (overs>=2) { const er=(s.runsConceded||0)/overs; if(er<5)p+=6;else if(er<6)p+=4;else if(er<7)p+=2;else if(er>10)p-=2;else if(er>9)p-=4;else if(er>8)p-=6; }
+  p += (s.catches||0)*8; if((s.catches||0)>=3) p+=4;
+  p += (s.runOutDirect||0)*12 + (s.runOutIndirect||0)*6 + (s.stumpings||0)*12;
+  if (s.playingXI) p+=4;
+  return Math.round(p);
+}
+
+function memberMatchTotal(team, stats) {
+  return Math.round((team.players||[]).reduce((acc, p) => {
+    let pts = calcPoints(stats[p]);
+    if (p===team.captain) pts*=2; else if (p===team.vc) pts*=1.5;
+    return acc+pts;
+  }, 0));
+}
+
+// ── State ──
+let db;
+let session = { name:null, isAdmin:false };
+let metaGame = {};          // /meta/game  { currentMatchId, adminPin, joinCode }
+let allMembers = {};        // /meta/members
+let currentMatch = {};      // /matches/{currentMatchId}
+let matchPlayers = [];      // currentMatch.players
+let playerStats = {};       // currentMatch.stats
+let allTeams = {};          // currentMatch.teams  { memberName: {players,captain,vc,submitted} }
+let seasonTotals = {};      // /season/totals
+let matchHistory = [];      // array of /matches/* docs (finalized)
+let localTeam = { players:[], captain:'', vc:'' };
+let urlJoinCode = null;
+let currentMatchId = null;
+// Auto-refresh
+let arInterval=null, arTimer=null, arSecs=0;
+
+// ── Boot ──
+async function boot() {
+  urlJoinCode = new URLSearchParams(location.search).get('join');
+  if (FIREBASE_CONFIG.apiKey==='REPLACE_apiKey') { showConfigError(); return; }
+  try {
+    const app = initializeApp(FIREBASE_CONFIG);
+    db = getFirestore(app);
+    showScreen('loading');
+
+    // Init meta/game if needed
+    const mgSnap = await getDoc(doc(db,'meta','game'));
+    if (!mgSnap.exists()) {
+      await setDoc(doc(db,'meta','game'), { currentMatchId:'', adminPin:'0000', joinCode:'' });
+    }
+
+    // Real-time: meta/game
+    onSnapshot(doc(db,'meta','game'), snap => {
+      metaGame = snap.data()||{};
+      const newMid = metaGame.currentMatchId||'';
+      if (newMid && newMid!==currentMatchId) {
+        currentMatchId = newMid;
+        subscribeCurrentMatch(newMid);
+      }
+      if (session.name||session.isAdmin) refreshView();
+    });
+
+    // Real-time: members
+    onSnapshot(doc(db,'meta','members'), snap => { allMembers=snap.data()||{}; });
+
+    // Real-time: season totals
+    onSnapshot(doc(db,'season','totals'), snap => {
+      seasonTotals=snap.data()||{};
+      if (session.name||session.isAdmin) refreshView();
+    });
+
+    if (urlJoinCode) showScreen('join');
+    else showScreen('login');
+  } catch(e) { showError('Firebase error: '+e.message); }
+}
+
+let matchUnsub = null;
+function subscribeCurrentMatch(mid) {
+  if (matchUnsub) matchUnsub();
+  matchUnsub = onSnapshot(doc(db,'matches',mid), snap => {
+    if (!snap.exists()) return;
+    currentMatch = snap.data()||{};
+    matchPlayers = currentMatch.players||[];
+    playerStats  = currentMatch.stats||{};
+    allTeams     = currentMatch.teams||{};
+    if (session.name||session.isAdmin) refreshView();
+  });
+}
+
+boot();
+
+// ── Router ──
+function showScreen(n) {
+  const map={loading:renderLoading,login:renderLogin,join:renderJoin,member:renderMember,admin:renderAdmin};
+  document.getElementById('app').innerHTML=(map[n]||renderLoading)();
+  requestAnimationFrame(()=>bindEvents(n));
+}
+function refreshView() {
+  if (session.isAdmin) showScreen('admin');
+  else if (session.name) showScreen('member');
+}
+
+// ─────────────────────────────────────────────
+//  LOGIN
+// ─────────────────────────────────────────────
+function renderLogin() {
+  return `<div class="screen-center"><div class="blob"></div>
+  <div class="card">
+    <div class="brand"><span class="b-ipl">IPL</span><span class="b-fl">Fantasy</span></div>
+    <p class="brand-sub">Private League · Toss Reveals All</p>
+    <div class="seg">
+      <button class="seg-btn active" data-p="admin">Admin</button>
+      <button class="seg-btn" data-p="member">I have a join code</button>
+    </div>
+    <div id="panel-admin">
+      <p class="fhint">League admin? Enter your 4-digit admin PIN.</p>
+      <div class="field"><label>Admin PIN</label>
+        <div class="pin-row">${'<input class="pd" maxlength="1" type="password" inputmode="numeric">'.repeat(4)}</div>
+      </div>
+      <div class="err" id="adminErr"></div>
+      <button class="btn-gold" id="adminLoginBtn">ADMIN LOGIN →</button>
+    </div>
+    <div id="panel-member" style="display:none">
+      <p class="fhint">Got a join code from your admin?</p>
+      <div class="field"><label>Join Code</label>
+        <input id="joinCodeInput" type="text" maxlength="8" placeholder="e.g. IPL247" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;text-align:center">
+      </div>
+      <div class="err" id="codeErr"></div>
+      <button class="btn-gold" id="goJoinBtn">JOIN →</button>
+    </div>
+  </div></div>`;
+}
+
+function renderJoin() {
+  const code=(urlJoinCode||'').toUpperCase();
+  return `<div class="screen-center"><div class="blob"></div>
+  <div class="card">
+    <div class="brand"><span class="b-ipl">IPL</span><span class="b-fl">Fantasy</span></div>
+    <p class="brand-sub">You've been invited!</p>
+    <div class="join-badge">${code}</div>
+    <div class="field"><label>Your Name</label><input id="joinName" type="text" placeholder="e.g. Rahul"></div>
+    <div class="field"><label>Team Name <span class="hint">(optional)</span></label><input id="joinTeamName" type="text" placeholder="e.g. Chennai Champions"></div>
+    <div class="field"><label>Choose a 4-digit PIN <span class="hint">(to log back in)</span></label>
+      <div class="pin-row">${'<input class="pj" maxlength="1" type="password" inputmode="numeric">'.repeat(4)}</div>
+    </div>
+    <div class="err" id="joinErr"></div>
+    <button class="btn-gold" id="joinSubmitBtn">JOIN & PICK TEAM →</button>
+    <button class="btn-ghost" style="width:100%;margin-top:8px" id="joinReturnBtn">Already joined? Log back in</button>
+  </div></div>`;
+}
+
+function renderReturnLogin() {
+  return `<div class="screen-center"><div class="blob"></div>
+  <div class="card">
+    <div class="brand"><span class="b-ipl">IPL</span><span class="b-fl">Fantasy</span></div>
+    <p class="brand-sub">Welcome back</p>
+    <div class="field"><label>Your Name</label><input id="returnName" type="text" placeholder="Your name"></div>
+    <div class="field"><label>Your PIN</label>
+      <div class="pin-row">${'<input class="pr" maxlength="1" type="password" inputmode="numeric">'.repeat(4)}</div>
+    </div>
+    <div class="err" id="returnErr"></div>
+    <button class="btn-gold" id="returnLoginBtn">LOG IN →</button>
+    <button class="btn-ghost" style="width:100%;margin-top:8px" id="backBtn">← Back</button>
+  </div></div>`;
+}
+
+function bindEvents(screen) {
+  setupPins();
+  if (screen==='login') {
+    document.querySelectorAll('.seg-btn').forEach(b=>{
+      b.onclick=()=>{
+        document.querySelectorAll('.seg-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+        document.getElementById('panel-admin').style.display=b.dataset.p==='admin'?'':'none';
+        document.getElementById('panel-member').style.display=b.dataset.p==='member'?'':'none';
+      };
+    });
+    document.getElementById('adminLoginBtn').onclick=doAdminLogin;
+    document.getElementById('goJoinBtn').onclick=()=>{
+      const code=document.getElementById('joinCodeInput').value.trim().toUpperCase();
+      if(!code){document.getElementById('codeErr').textContent='Enter a join code';return;}
+      window.location.href=`${location.pathname}?join=${code}`;
+    };
+  }
+  if (screen==='join') {
+    document.getElementById('joinSubmitBtn').onclick=doJoin;
+    document.getElementById('joinReturnBtn').onclick=()=>{ document.getElementById('app').innerHTML=renderReturnLogin(); requestAnimationFrame(()=>{setupPins();bindReturn();}); };
+  }
+  if (screen==='member') bindMember();
+  if (screen==='admin')  bindAdmin();
+}
+
+function setupPins() {
+  ['.pd','.pj','.pr'].forEach(sel=>{
+    const ds=[...document.querySelectorAll(sel)];
+    ds.forEach((d,i)=>{ d.oninput=()=>{d.value=d.value.replace(/\D/,'');if(d.value&&i<ds.length-1)ds[i+1].focus();}; d.onkeydown=e=>{if(e.key==='Backspace'&&!d.value&&i>0)ds[i-1].focus();}; });
+  });
+}
+function pinVal(sel){return[...document.querySelectorAll(sel)].map(d=>d.value).join('');}
+
+function bindReturn() {
+  document.getElementById('returnLoginBtn').onclick=async()=>{
+    const name=document.getElementById('returnName').value.trim(), pin=pinVal('.pr'), err=document.getElementById('returnErr');
+    if(!name){err.textContent='Enter your name';return;}
+    if(pin.length!==4){err.textContent='Enter 4-digit PIN';return;}
+    const snap=await getDoc(doc(db,'meta','members')); const members=snap.data()||{};
+    if(!members[name]){err.textContent='Name not found — use your join link';return;}
+    if(members[name].pin!==pin){err.textContent='Wrong PIN';return;}
+    session={name,isAdmin:false};
+    // Load their team for current match
+    if (currentMatchId) {
+      const matchSnap=await getDoc(doc(db,'matches',currentMatchId));
+      if(matchSnap.exists()){const t=(matchSnap.data().teams||{})[name]||{}; localTeam={players:t.players||[],captain:t.captain||'',vc:t.vc||''};}
+    }
+    showScreen('member');
+  };
+  document.getElementById('backBtn').onclick=()=>showScreen('join');
+}
+
+async function doAdminLogin() {
+  const pin=pinVal('.pd'), err=document.getElementById('adminErr');
+  const snap=await getDoc(doc(db,'meta','game')); const gd=snap.data()||{};
+  if(pin===(gd.adminPin||'0000')){session={name:null,isAdmin:true};showScreen('admin');}
+  else err.textContent='Wrong PIN';
+}
+
+async function doJoin() {
+  const name=(document.getElementById('joinName')?.value||'').trim();
+  const teamName=(document.getElementById('joinTeamName')?.value||'').trim();
+  const pin=pinVal('.pj'), code=(urlJoinCode||'').toUpperCase(), err=document.getElementById('joinErr');
+  if(!name){err.textContent='Enter your name';return;}
+  if(pin.length!==4||!/^\d{4}$/.test(pin)){err.textContent='Choose a 4-digit PIN';return;}
+  const snap=await getDoc(doc(db,'meta','game')); const gd=snap.data()||{};
+  if((gd.joinCode||'').toUpperCase()!==code){err.textContent='Invalid join code';return;}
+  const mSnap=await getDoc(doc(db,'meta','members')); const members=mSnap.data()||{};
+  if(members[name]&&members[name].pin!==pin){err.textContent='Name taken — use a different name or correct PIN';return;}
+  members[name]={pin,teamName:teamName||name+"'s Team",joinedAt:Date.now()};
+  await setDoc(doc(db,'meta','members'),members); allMembers=members;
+  session={name,isAdmin:false}; localTeam={players:[],captain:'',vc:''};
+  history.replaceState({},'',location.pathname);
+  showScreen('member');
+}
+
+// ─────────────────────────────────────────────
+//  MEMBER VIEW
+// ─────────────────────────────────────────────
+function renderMember() {
+  const tab = (new URLSearchParams(location.search)).get('tab')||'team';
+
+  // Nav tabs
+  const tabs = `
+  <div class="view-tabs">
+    <button class="vtab ${tab==='team'?'active':''}" onclick="switchTab('team')">My Team</button>
+    <button class="vtab ${tab==='live'?'active':''}" onclick="switchTab('live')">Live Scores</button>
+    <button class="vtab ${tab==='season'?'active':''}" onclick="switchTab('season')">Season Table</button>
+  </div>`;
+
+  let body='';
+  if (tab==='team')   body=renderTeamTab();
+  if (tab==='live')   body=renderLiveTab();
+  if (tab==='season') body=renderSeasonTab();
+
+  return `<div class="screen-main">${nav()}${tabs}${body}</div>`;
+}
+
+// expose for onclick
+window.switchTab = function(t) {
+  history.replaceState({},'',`${location.pathname}?tab=${t}`);
+  showScreen('member');
+};
+
+function renderTeamTab() {
+  const noMatch = !currentMatchId || !currentMatch.label;
+  if (noMatch) return `<div class="empty-state"><div class="es-icon">🏏</div><p>No match set up yet.</p><p class="muted">Your admin will set up the next match soon.</p></div>`;
+
+  const locked    = currentMatch.locked||currentMatch.revealed||currentMatch.finalized;
+  const revealed  = currentMatch.revealed||currentMatch.finalized;
+  const myTeam    = allTeams[session.name]||{};
+  const submitted = myTeam.submitted;
+  const sel       = localTeam.players;
+  const pool      = matchPlayers;
+
+  if (revealed) {
+    // Show this match's leaderboard
+    return renderMatchLeaderboard(currentMatch, currentMatchId, session.name);
+  }
+
+  return `
+  <div class="match-bar">
+    <div><div class="match-label-sm">CURRENT MATCH</div><div class="match-title">${currentMatch.label||'–'}</div></div>
+    <span class="pill ${locked?'pill-red':'pill-green'}">${locked?'🔒 Locked':'🟢 Open'}</span>
+  </div>
+
+  ${locked && submitted ? `
+  <div class="info-banner green">
+    <div class="ib-icon">✅</div>
+    <div><div class="ib-title">Team locked in!</div><div class="ib-sub">Revealed when admin triggers toss.</div></div>
+  </div>
+  <div class="chip-row">${(myTeam.players||[]).map(p=>`<span class="pchip ${p===myTeam.captain?'pchip-c':p===myTeam.vc?'pchip-vc':''}">${p===myTeam.captain?'©':p===myTeam.vc?'ᵛ':''}${ln(p)}</span>`).join('')}</div>`
+
+  : locked && !submitted ? `
+  <div class="info-banner red">
+    <div class="ib-icon">⚠️</div>
+    <div><div class="ib-title">Deadline passed</div><div class="ib-sub">You didn't submit for this match.</div></div>
+  </div>`
+
+  : !pool.length ? `
+  <div class="info-banner warn">⏳ Admin hasn't loaded today's player pool yet.</div>`
+
+  : `
+  <div class="builder">
+    <div class="bh">
+      <h2>Pick Your XI <span class="ctr">${sel.length}/11</span></h2>
+      <p>New XI for every match · Captain 2× · Vice-Captain 1.5×</p>
+    </div>
+    <div class="filter-bar">
+      <input class="sinp" id="pSearch" placeholder="🔍 Search player or team…">
+      <div class="rtabs">${['ALL','BAT','BOWL','AR','WK'].map(r=>`<button class="rtab ${r==='ALL'?'active':''}" data-r="${r}">${r}</button>`).join('')}</div>
+    </div>
+    <div class="pgrid" id="pgrid">${renderGrid(sel,'ALL','',pool)}</div>
+    ${sel.length>0?`
+    <div class="xi-panel">
+      <div class="xi-title">Your XI</div>
+      <div class="xi-chips" id="xiChips">${renderXIChips(sel,localTeam.captain,localTeam.vc)}</div>
+      <div class="cap-grid">
+        <div class="cs"><label>Captain (2×)</label><select id="capSel">${sel.map(p=>`<option value="${p}" ${p===localTeam.captain?'selected':''}>${p}</option>`).join('')}</select></div>
+        <div class="cs"><label>Vice-Captain (1.5×)</label><select id="vcSel">${sel.map(p=>`<option value="${p}" ${p===localTeam.vc?'selected':''}>${p}</option>`).join('')}</select></div>
+      </div>
+      ${sel.length===11?`<button class="btn-gold btn-lock" id="lockTeamBtn">🔒 LOCK IN MY TEAM</button>`:`<div class="need-more">Need ${11-sel.length} more</div>`}
+    </div>`:`<div class="empty-hint">Tap a player card to add them</div>`}
+  </div>`}`;
+}
+
+function renderLiveTab() {
+  const noMatch = !currentMatchId || !currentMatch.label;
+  if (noMatch) return `<div class="empty-state"><div class="es-icon">📺</div><p class="muted">No match in progress.</p></div>`;
+  if (!currentMatch.revealed) return `<div class="empty-state"><div class="es-icon">🔒</div><p>Live scores will appear after the toss reveal.</p></div>`;
+  return renderMatchLeaderboard(currentMatch, currentMatchId, session.name);
+}
+
+function renderMatchLeaderboard(match, mid, highlightName) {
+  const stats   = match.stats||{};
+  const teams   = match.teams||{};
+  const members = Object.keys(allMembers);
+  const ranked  = members.map(name=>{
+    const t=teams[name]||{}; return {name,total:memberMatchTotal(t,stats),team:t,teamName:allMembers[name]?.teamName||name};
+  }).sort((a,b)=>b.total-a.total);
+  const medals=['🥇','🥈','🥉'];
+
+  return `
+  <div class="reveal-banner">
+    <div class="rb-eye">🏏 ${match.finalized?'MATCH FINAL':'LIVE SCORES'}</div>
+    <div class="rb-title">${match.label||'Match'}</div>
+    <div class="rb-sub">${match.finalized?'Points saved to season table':'Updates every few minutes'}</div>
+  </div>
+  <div class="lb-list">
+    ${ranked.map((r,i)=>`
+    <div class="lb-card ${r.name===highlightName?'lb-me':''} ${i===0?'lb-top':''}">
+      <div class="lb-med">${medals[i]||'#'+(i+1)}</div>
+      <div class="lb-body">
+        <div class="lb-name">${r.name}${r.name===highlightName?' <span class="you">YOU</span>':''}</div>
+        <div class="lb-tname">${r.teamName}</div>
+        <div class="lb-chips">
+          ${(r.team.players||[]).map(p=>{
+            let pts=calcPoints(stats[p]);
+            const isC=p===r.team.captain,isV=p===r.team.vc;
+            if(isC)pts*=2;else if(isV)pts*=1.5;
+            return `<span class="lchip ${isC?'lchip-c':isV?'lchip-vc':''}">${isC?'©':isV?'ᵛ':''}${ln(p)} <em>${Math.round(pts)}</em></span>`;
+          }).join('')||'<span class="muted-s">No team submitted</span>'}
+        </div>
+      </div>
+      <div class="lb-score">${r.total}<span>pts</span></div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderSeasonTab() {
+  const members = Object.keys(allMembers);
+  if (!members.length) return `<div class="empty-state"><div class="es-icon">🏆</div><p class="muted">No season data yet.</p></div>`;
+
+  // Build season rows
+  const rows = members.map(name=>{
+    const sd=seasonTotals[name]||{total:0,matches:[]};
+    return { name, teamName:allMembers[name]?.teamName||name, total:sd.total||0, matches:sd.matches||[] };
+  }).sort((a,b)=>b.total-a.total);
+
+  // Get all unique match labels from history
+  const matchCols = [...new Set(rows.flatMap(r=>r.matches.map(m=>m.matchId)))];
+
+  const medals=['🥇','🥈','🥉'];
+
+  return `
+  <div class="season-header">
+    <div class="sh-title">Season Leaderboard</div>
+    <div class="sh-sub">${matchCols.length} match${matchCols.length!==1?'es':''} played</div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="season-cards">
+    ${rows.map((r,i)=>`
+    <div class="sc-card ${r.name===session.name?'sc-me':''} ${i===0?'sc-first':''}">
+      <div class="sc-rank">${medals[i]||'#'+(i+1)}</div>
+      <div class="sc-body">
+        <div class="sc-name">${r.name}${r.name===session.name?' <span class="you">YOU</span>':''}</div>
+        <div class="sc-tname">${r.teamName}</div>
+        <div class="sc-history">
+          ${r.matches.length?r.matches.map(m=>`<span class="sc-mpill" title="${m.label}">${m.pts}pts</span>`).join(''):'<span class="muted-s">No matches yet</span>'}
+        </div>
+      </div>
+      <div class="sc-total">${r.total}<span>total pts</span></div>
+    </div>`).join('')}
+  </div>
+
+  <!-- Per-match breakdown table -->
+  ${matchCols.length?`
+  <div class="history-section">
+    <div class="hs-title">Match-by-Match Breakdown</div>
+    <div class="table-wrap">
+      <table class="hist-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            ${rows[0].matches.map(m=>`<th>${m.label.split('–')[0].trim().substring(0,8)}</th>`).join('')}
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r=>`
+          <tr class="${r.name===session.name?'tr-me':''}">
+            <td class="td-name">${r.name}</td>
+            ${r.matches.map(m=>`<td class="td-pts">${m.pts}</td>`).join('')}
+            <td class="td-total">${r.total}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`:''}`;
+}
+
+const MAX_PER_TEAM = 6;
+
+function teamCounts(sel, pool) {
+  // Returns { teamName: count } for selected players
+  const counts = {};
+  sel.forEach(name => {
+    const p = pool.find(x=>x.name===name);
+    if (p) counts[p.team] = (counts[p.team]||0) + 1;
+  });
+  return counts;
+}
+
+function renderGrid(sel, role, search, pool) {
+  const ri={BAT:'🏏',BOWL:'🎳',AR:'⚡',WK:'🧤'};
+  const counts = teamCounts(sel, pool);
+  const filtered=pool.filter(p=>(role==='ALL'||p.role===role)&&(p.name.toLowerCase().includes(search.toLowerCase())||p.team.toLowerCase().includes(search.toLowerCase())));
+  if(!filtered.length) return `<div class="empty-hint" style="grid-column:1/-1">No players match</div>`;
+  return filtered.map(p=>{
+    const s=sel.includes(p.name);
+    const teamFull = !s && (counts[p.team]||0) >= MAX_PER_TEAM;
+    const xiFull   = !s && sel.length >= 11;
+    const d = teamFull || xiFull;
+    const reason = teamFull ? `Max ${MAX_PER_TEAM} from ${p.team}` : '';
+    return `<div class="pcard ${s?'pcard-on':''} ${d?'pcard-dis':''}" data-p="${p.name}" data-team="${p.team}" ${d?'title="'+reason+'"':''}>
+      ${s?'<div class="pchk">✓</div>':''}
+      ${teamFull?`<div class="team-cap-badge">MAX</div>`:''}
+      <div class="pc-role">${ri[p.role]||''} ${p.role}</div>
+      <div class="pc-name">${p.name}</div>
+      <div class="pc-team">${p.team} ${counts[p.team]&&!s?`<span class="team-cnt">${counts[p.team]}/${MAX_PER_TEAM}</span>`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderXIChips(sel,cap,vc){
+  return sel.map(p=>`<span class="xchip ${p===cap?'xchip-c':p===vc?'xchip-vc':''}">${p===cap?'<b>C</b>':p===vc?'<b>VC</b>':''}${ln(p)}</span>`).join('');
+}
+
+function bindMember() {
+  document.getElementById('logoutBtn')?.addEventListener('click',()=>{stopAR();session={name:null,isAdmin:false};history.replaceState({},'',location.pathname);showScreen('login');});
+
+  const tab=(new URLSearchParams(location.search)).get('tab')||'team';
+  if(tab!=='team') return;
+  if(currentMatch.revealed||currentMatch.finalized||currentMatch.locked) return;
+
+  const pool=matchPlayers;
+  let curRole='ALL',curSearch='';
+
+  function reRender(){
+    document.getElementById('pgrid').innerHTML=renderGrid(localTeam.players,curRole,curSearch,pool);
+    const xc=document.getElementById('xiChips'); if(xc) xc.innerHTML=renderXIChips(localTeam.players,localTeam.captain,localTeam.vc);
+    bindCards();
+  }
+  function bindCards(){
+    document.querySelectorAll('.pcard:not(.pcard-dis)').forEach(c=>{
+      c.onclick=()=>{
+        const p=c.dataset.p;
+        const pTeam=c.dataset.team;
+        if(localTeam.players.includes(p)){
+          // Deselect
+          localTeam.players=localTeam.players.filter(x=>x!==p);
+          if(localTeam.captain===p)localTeam.captain='';
+          if(localTeam.vc===p)localTeam.vc='';
+        } else if(localTeam.players.length>=11){
+          toast('Already have 11 players','err'); return;
+        } else {
+          // Check 6-per-team cap
+          const pool=matchPlayers;
+          const counts=teamCounts(localTeam.players,pool);
+          if((counts[pTeam]||0)>=MAX_PER_TEAM){
+            toast(`Max ${MAX_PER_TEAM} players from ${pTeam}`,'err'); return;
+          }
+          localTeam.players.push(p);
+          if(!localTeam.captain)localTeam.captain=p;
+          else if(!localTeam.vc&&p!==localTeam.captain)localTeam.vc=p;
+        }
+        showScreen('member');bindMember();
+      };
+    });
+  }
+  bindCards();
+  document.querySelectorAll('.rtab').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.rtab').forEach(x=>x.classList.remove('active'));b.classList.add('active');curRole=b.dataset.r;reRender();};});
+  document.getElementById('pSearch')?.addEventListener('input',e=>{curSearch=e.target.value;reRender();});
+  document.getElementById('capSel')?.addEventListener('change',e=>{localTeam.captain=e.target.value;if(localTeam.vc===e.target.value)localTeam.vc='';document.getElementById('xiChips').innerHTML=renderXIChips(localTeam.players,localTeam.captain,localTeam.vc);});
+  document.getElementById('vcSel')?.addEventListener('change',e=>{localTeam.vc=e.target.value;if(localTeam.captain===e.target.value)localTeam.captain='';document.getElementById('xiChips').innerHTML=renderXIChips(localTeam.players,localTeam.captain,localTeam.vc);});
+  document.getElementById('lockTeamBtn')?.addEventListener('click',async()=>{
+    if(localTeam.players.length!==11){toast('Select exactly 11 players','err');return;}
+    if(!localTeam.captain){toast('Pick a Captain','err');return;}
+    if(!localTeam.vc||localTeam.vc===localTeam.captain){toast('Pick a different Vice-Captain','err');return;}
+    // Final safety: enforce 6-per-team cap
+    const finalCounts=teamCounts(localTeam.players,matchPlayers);
+    const breached=Object.entries(finalCounts).find(([,c])=>c>MAX_PER_TEAM);
+    if(breached){toast(`Too many players from ${breached[0]} (max ${MAX_PER_TEAM})`,'err');return;}
+    const btn=document.getElementById('lockTeamBtn');btn.textContent='Saving…';btn.disabled=true;
+    try {
+      // Save team into match doc under teams.{name}
+      const matchRef=doc(db,'matches',currentMatchId);
+      const matchSnap=await getDoc(matchRef);
+      const matchData=matchSnap.data()||{};
+      const teams=matchData.teams||{};
+      teams[session.name]={players:localTeam.players,captain:localTeam.captain,vc:localTeam.vc,submitted:true,updatedAt:Date.now()};
+      await updateDoc(matchRef,{teams});
+      allTeams[session.name]={...localTeam,submitted:true};
+      toast('Team locked! 🔒');showScreen('member');
+    } catch(e){toast('Error: '+e.message,'err');btn.textContent='🔒 LOCK IN MY TEAM';btn.disabled=false;}
+  });
+}
+
+// ─────────────────────────────────────────────
+//  ADMIN VIEW
+// ─────────────────────────────────────────────
+function renderAdmin() {
+  const adminTab=(new URLSearchParams(location.search)).get('atab')||'match';
+  const tabs=`
+  <div class="view-tabs">
+    <button class="vtab ${adminTab==='match'?'active':''}" onclick="switchAdminTab('match')">Current Match</button>
+    <button class="vtab ${adminTab==='stats'?'active':''}" onclick="switchAdminTab('stats')">Player Stats</button>
+    <button class="vtab ${adminTab==='season'?'active':''}" onclick="switchAdminTab('season')">Season Table</button>
+    <button class="vtab ${adminTab==='league'?'active':''}" onclick="switchAdminTab('league')">League Setup</button>
+  </div>`;
+
+  let body='';
+  if (adminTab==='match')  body=renderAdminMatch();
+  if (adminTab==='stats')  body=renderAdminStats();
+  if (adminTab==='season') body=renderAdminSeason();
+  if (adminTab==='league') body=renderAdminLeague();
+
+  return `<div class="screen-main">${nav(true)}${tabs}${body}</div>`;
+}
+
+window.switchAdminTab=function(t){history.replaceState({},'',`${location.pathname}?atab=${t}`);showScreen('admin');};
+
+function renderAdminMatch() {
+  const hasMatch = !!currentMatchId;
+  const locked   = currentMatch.locked||currentMatch.revealed||currentMatch.finalized;
+  const revealed = currentMatch.revealed||currentMatch.finalized;
+  const finalized= currentMatch.finalized;
+  const members  = Object.keys(allMembers);
+  const subs     = members.filter(n=>(allTeams[n]||{}).submitted).length;
+  const ranked   = members.map(n=>({name:n,total:memberMatchTotal(allTeams[n]||{},playerStats),submitted:!!(allTeams[n]||{}).submitted})).sort((a,b)=>b.total-a.total);
+
+  return `
+  <div class="admin-2col">
+    <div class="acol">
+
+      <div class="acard">
+        <div class="acard-t">🏏 Current Match</div>
+        ${hasMatch?`
+        <div class="match-bar" style="margin:0 0 12px">
+          <div><div class="match-label-sm">ACTIVE</div><div class="match-title">${currentMatch.label||'–'}</div></div>
+          <span class="pill ${locked?'pill-red':'pill-green'}">${finalized?'✓ Final':revealed?'Revealed':locked?'Locked':'Open'}</span>
+        </div>`:'<p class="muted">No match active. Create one below.</p>'}
+        <div class="field"><label>Match Label</label><input id="matchLbl" type="text" value="${currentMatch.label||''}" placeholder="e.g. MI vs CSK — Match 5"></div>
+        <div class="field"><label>Team 1</label><input id="t1" type="text" value="${currentMatch.t1||''}" placeholder="Mumbai Indians"></div>
+        <div class="field"><label>Team 2</label><input id="t2" type="text" value="${currentMatch.t2||''}" placeholder="Chennai Super Kings"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-gold" style="font-size:15px;padding:10px" id="createMatchBtn">${hasMatch?'Update Match':'+ Create New Match'}</button>
+        </div>
+      </div>
+
+      <div class="acard">
+        <div class="acard-t">🎮 Match Control</div>
+        <div class="srow"><span>Submissions</span><span class="pill pill-green">${subs}/${members.length}</span></div>
+        <div class="srow"><span>Locked</span><span class="pill ${locked?'pill-red':'pill-green'}">${locked?'YES':'NO'}</span></div>
+        <div class="srow"><span>Revealed</span><span class="pill ${revealed?'pill-red':'pill-green'}">${revealed?'YES':'NO'}</span></div>
+        <div class="srow"><span>Finalized</span><span class="pill ${finalized?'pill-red':'pill-green'}">${finalized?'YES':'NO'}</span></div>
+        <div class="ctrl-btns">
+          ${!locked&&hasMatch?`<button class="btn-warn" id="lockBtn">🔒 Lock Teams (before toss)</button>`:''}
+          ${locked&&!revealed?`<button class="btn-reveal" id="revealBtn">🥁 TOSS DONE — REVEAL!</button>`:''}
+          ${revealed&&!finalized?`<button class="btn-warn" id="finalizeBtn">✅ Finalize & Save to Season</button>`:''}
+          ${finalized?`<button class="btn-gold" style="font-size:15px;padding:10px" id="newMatchBtn">+ Start Next Match</button>`:''}
+        </div>
+        ${finalized?'<p class="muted" style="margin-top:8px;font-size:12px">Points saved to season table. Start a new match when ready.</p>':''}
+      </div>
+
+      <div class="acard">
+        <div class="acard-t">👥 Submissions (${subs}/${members.length})</div>
+        ${!members.length?'<p class="muted">No members yet.</p>':''}
+        ${ranked.map((r,i)=>`
+        <div class="mrow">
+          <span class="mrow-r">${i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1)}</span>
+          <span class="mrow-n">${r.name}</span>
+          <span class="mrow-s ${r.submitted?'s-yes':'s-no'}">${r.submitted?'✓':'Pending'}</span>
+          ${revealed?`<span class="mrow-p">${r.total}pts</span>`:''}
+        </div>`).join('')}
+      </div>
+
+    </div>
+    <div class="acol">
+      <div class="acard">
+        <div class="acard-t">🔑 CricketAPI & Players</div>
+        <div class="field"><label>CricketData.org API Key <a class="alink" href="https://cricketdata.org" target="_blank">get free →</a></label><input id="cricKey" type="text" value="${metaGame.cricApiKey||''}" placeholder="Paste API key"></div>
+        <div class="field"><label>Match ID (auto-filled when you pick a match)</label><input id="matchId" type="text" value="${currentMatch.liveMatchId||''}" placeholder="–"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm" id="saveApiBtn">Save Key</button>
+          <button class="btn-sm" id="fetchMatchBtn">Find IPL Matches</button>
+        </div>
+        <div id="matchesList" style="margin-top:12px"></div>
+        ${matchPlayers.length?`
+        <div style="margin-top:14px">
+          <div class="acard-t" style="font-size:13px;margin-bottom:8px">Pool: ${matchPlayers.length} players</div>
+          <div class="pool-chips">${matchPlayers.map(p=>`<span class="pool-chip">${p.name} <em>${p.team}</em></span>`).join('')}</div>
+        </div>`:`<div class="info-banner warn" style="margin-top:12px">No player pool loaded yet.</div>`}
+      </div>
+      ${revealed?renderMatchLeaderboard(currentMatch,currentMatchId,null):''}
+    </div>
+  </div>`;
+}
+
+function renderAdminStats() {
+  const hasMatch=!!currentMatchId;
+  if(!hasMatch) return `<div class="empty-state"><div class="es-icon">📊</div><p class="muted">Create a match first.</p></div>`;
+  return `
+  <div class="acard">
+    <div class="acard-hrow">
+      <div class="acard-t">📊 Player Stats — ${currentMatch.label||'Current Match'}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button class="btn-sm" id="autoStatsBtn">⚡ Fetch Now</button>
+        <div class="ar-wrap">
+          <span class="ar-lbl">Auto every</span>
+          <select class="ar-sel" id="arInterval">
+            <option value="0">Off</option>
+            <option value="120">2 min</option>
+            <option value="300" selected>5 min</option>
+            <option value="600">10 min</option>
+          </select>
+          <button class="ar-btn ${arInterval?'ar-on':'ar-off'}" id="arToggleBtn">${arInterval?'🟢 ON':'⏸ OFF'}</button>
+          ${arInterval?`<span class="ar-cd" id="arCountdown">next in ${arSecs}s</span>`:''}
+        </div>
+      </div>
+    </div>
+    <p class="muted" style="margin-bottom:10px">Stats update the leaderboard live for everyone.</p>
+    <input class="sinp" id="statsSearch" placeholder="🔍 Search player…">
+    <div class="stats-grid" id="statsGrid">${renderStatsGrid('')}</div>
+  </div>`;
+}
+
+function renderAdminSeason() {
+  const members=Object.keys(allMembers);
+  const rows=members.map(name=>{
+    const sd=seasonTotals[name]||{total:0,matches:[]};
+    return {name,teamName:allMembers[name]?.teamName||name,total:sd.total||0,matches:sd.matches||[]};
+  }).sort((a,b)=>b.total-a.total);
+  const medals=['🥇','🥈','🥉'];
+
+  return `
+  <div class="acard">
+    <div class="acard-hrow">
+      <div class="acard-t">🏆 Season Leaderboard</div>
+      <button class="btn-sm" id="exportBtn">Export CSV</button>
+    </div>
+    ${!rows.length?'<p class="muted">No season data yet. Finalize a match to save points.</p>':''}
+    <div class="season-cards">
+      ${rows.map((r,i)=>`
+      <div class="sc-card ${i===0?'sc-first':''}">
+        <div class="sc-rank">${medals[i]||'#'+(i+1)}</div>
+        <div class="sc-body">
+          <div class="sc-name">${r.name}</div>
+          <div class="sc-tname">${r.teamName}</div>
+          <div class="sc-history">${r.matches.map(m=>`<span class="sc-mpill" title="${m.label||''}">${(m.label||'').split('–')[0].trim().substring(0,8)}: <b>${m.pts}</b></span>`).join('')||'<span class="muted-s">No matches</span>'}</div>
+        </div>
+        <div class="sc-total">${r.total}<span>pts</span></div>
+      </div>`).join('')}
+    </div>
+    ${rows.length&&rows[0].matches.length?`
+    <div class="history-section" style="margin-top:20px">
+      <div class="hs-title">Full Breakdown</div>
+      <div class="table-wrap">
+        <table class="hist-table">
+          <thead><tr><th>Player</th>${rows[0].matches.map(m=>`<th>${(m.label||'').split('–')[0].trim().substring(0,10)}</th>`).join('')}<th>Total</th></tr></thead>
+          <tbody>${rows.map(r=>`<tr><td class="td-name">${r.name}</td>${r.matches.map(m=>`<td class="td-pts">${m.pts}</td>`).join('')}<td class="td-total">${r.total}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`:''}
+  </div>`;
+}
+
+function renderAdminLeague() {
+  const joinLink=metaGame.joinCode?`${location.origin}${location.pathname}?join=${metaGame.joinCode}`:'';
+  return `
+  <div class="admin-2col">
+    <div class="acol">
+      <div class="acard">
+        <div class="acard-t">⚙️ League Settings</div>
+        <div class="field"><label>Admin PIN</label><input id="adminPinInp" type="text" maxlength="4" value="${metaGame.adminPin||'0000'}"></div>
+        <button class="btn-sm" id="saveLeagueBtn">Save</button>
+      </div>
+      <div class="acard">
+        <div class="acard-t">🔗 Invite Friends</div>
+        ${metaGame.joinCode?`
+        <div class="join-badge">${metaGame.joinCode}</div>
+        <div class="jlink-box"><span id="jlinkText">${joinLink}</span><button class="btn-copy" id="copyLinkBtn">Copy</button></div>
+        <p class="muted" style="font-size:12px;margin-top:8px">Share this link. Friends tap it to register.</p>
+        <button class="btn-sm" style="margin-top:10px" id="regenCodeBtn">New Code</button>`:`
+        <p class="muted">Generate a join link to invite friends.</p>
+        <button class="btn-gold" style="margin-top:12px;font-size:16px;padding:11px" id="genCodeBtn">GENERATE JOIN LINK</button>`}
+      </div>
+    </div>
+    <div class="acol">
+      <div class="acard">
+        <div class="acard-t">👥 All Members (${Object.keys(allMembers).length})</div>
+        ${Object.keys(allMembers).length?Object.entries(allMembers).map(([name,m])=>`
+        <div class="mrow"><span class="mrow-n">${name}</span><span class="mrow-s s-yes">${m.teamName||'–'}</span></div>`).join(''):'<p class="muted">No members yet.</p>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderStatsGrid(search) {
+  const ri={BAT:'🏏',BOWL:'🎳',AR:'⚡',WK:'🧤'};
+  const pool=matchPlayers.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())||p.team.toLowerCase().includes(search.toLowerCase()));
+  if(!pool.length) return `<div class="muted" style="padding:20px;text-align:center">${matchPlayers.length?'No players match':'Load today\'s match players first (in Current Match tab)'}</div>`;
+  return pool.map(p=>{
+    const s=playerStats[p.name]||{},pts=calcPoints(s);
+    return `<div class="stat-card">
+      <div class="sc-hd"><div><div class="sc-nm">${p.name}</div><div class="sc-tm">${ri[p.role]||''} ${p.team}</div></div>
+      <div class="sc-pts ${pts>0?'sc-pts-on':''}">${pts>0?pts+' pts':'–'}</div></div>
+      <div class="sc-inp">
+        ${[['runs','Runs'],['balls','Balls'],['fours','4s'],['sixes','6s'],['wickets','Wkts'],['overs','Ovrs'],['runsConceded','RC'],['catches','Ctch'],['stumpings','St'],['lbwBowled','LBW']].map(([f,l])=>`
+        <div class="si-g"><label>${l}</label><input type="number" class="si" data-f="${f}" data-p="${p.name}" value="${s[f]||0}" min="0"${f==='overs'?' step="0.1"':''}></div>`).join('')}
+      </div>
+      <div class="sc-chk">
+        <label><input type="checkbox" class="sic" data-f="playingXI" data-p="${p.name}" ${s.playingXI?'checked':''}> Playing XI</label>
+        <label><input type="checkbox" class="sic" data-f="batted" data-p="${p.name}" ${s.batted?'checked':''}> Batted</label>
+      </div>
+      <button class="btn-save" data-p="${p.name}">Save</button>
+    </div>`;
+  }).join('');
+}
+
+function bindAdmin() {
+  document.getElementById('logoutBtn')?.addEventListener('click',()=>{stopAR();session={name:null,isAdmin:false};history.replaceState({},'',location.pathname);showScreen('login');});
+  const tab=(new URLSearchParams(location.search)).get('atab')||'match';
+
+  if (tab==='match') {
+    document.getElementById('createMatchBtn')?.addEventListener('click',createOrUpdateMatch);
+    document.getElementById('lockBtn')?.addEventListener('click',async()=>{
+      if(!confirm('Lock teams? No edits after this.'))return;
+      await updateDoc(doc(db,'matches',currentMatchId),{locked:true});toast('Teams locked 🔒');showScreen('admin');
+    });
+    document.getElementById('revealBtn')?.addEventListener('click',async()=>{
+      if(!confirm('Reveal all teams to everyone?'))return;
+      await updateDoc(doc(db,'matches',currentMatchId),{revealed:true,locked:true});toast('Teams revealed! 🥁');showScreen('admin');
+    });
+    document.getElementById('finalizeBtn')?.addEventListener('click',finalizeMatch);
+    document.getElementById('newMatchBtn')?.addEventListener('click',()=>{
+      if(!confirm('Start a new match? The current match stays in history.'))return;
+      currentMatchId=''; currentMatch={}; matchPlayers=[]; playerStats={}; allTeams={}; localTeam={players:[],captain:'',vc:''};
+      updateDoc(doc(db,'meta','game'),{currentMatchId:''}).then(()=>showScreen('admin'));
+    });
+    document.getElementById('saveApiBtn')?.addEventListener('click',async()=>{
+      await updateDoc(doc(db,'meta','game'),{cricApiKey:document.getElementById('cricKey').value.trim()});
+      toast('API key saved');
+    });
+    document.getElementById('fetchMatchBtn')?.addEventListener('click',fetchMatches);
+  }
+
+  if (tab==='stats') {
+    document.getElementById('autoStatsBtn')?.addEventListener('click',()=>autoFetchStats(true));
+    document.getElementById('arToggleBtn')?.addEventListener('click',()=>{
+      if(arInterval){stopAR();toast('Auto-refresh stopped');}
+      else{const secs=parseInt(document.getElementById('arInterval')?.value||'300');if(!secs){toast('Select interval','err');return;}startAR(secs);toast(`Auto-refresh every ${secs>=60?secs/60+' min':secs+'s'} — ON 🟢`);}
+      showScreen('admin');
+    });
+    document.getElementById('statsSearch')?.addEventListener('input',e=>{document.getElementById('statsGrid').innerHTML=renderStatsGrid(e.target.value);bindSave();});
+    bindSave();
+  }
+
+  if (tab==='season') {
+    document.getElementById('exportBtn')?.addEventListener('click',exportCSV);
+  }
+
+  if (tab==='league') {
+    document.getElementById('saveLeagueBtn')?.addEventListener('click',async()=>{
+      await updateDoc(doc(db,'meta','game'),{adminPin:document.getElementById('adminPinInp').value.trim()});toast('Saved ✓');
+    });
+    const gen=()=>Math.random().toString(36).substring(2,5).toUpperCase()+Math.random().toString(36).substring(2,5).toUpperCase();
+    document.getElementById('genCodeBtn')?.addEventListener('click',async()=>{const c=gen();await updateDoc(doc(db,'meta','game'),{joinCode:c});toast('Join link created!');showScreen('admin');});
+    document.getElementById('regenCodeBtn')?.addEventListener('click',async()=>{if(!confirm('New code? Old link stops working.'))return;const c=gen();await updateDoc(doc(db,'meta','game'),{joinCode:c});toast('New code generated');showScreen('admin');});
+    document.getElementById('copyLinkBtn')?.addEventListener('click',()=>{navigator.clipboard.writeText(document.getElementById('jlinkText')?.textContent||'').then(()=>toast('Copied!')).catch(()=>toast('Copy failed','err'));});
+  }
+}
+
+// ── Create / Update Match ──
+async function createOrUpdateMatch() {
+  const label=document.getElementById('matchLbl').value.trim();
+  const t1=document.getElementById('t1').value.trim();
+  const t2=document.getElementById('t2').value.trim();
+  if(!label){toast('Enter a match label','err');return;}
+
+  if(currentMatchId && !currentMatch.finalized) {
+    // Update existing
+    await updateDoc(doc(db,'matches',currentMatchId),{label,t1,t2});
+    toast('Match updated');
+  } else {
+    // Create new match
+    const mid='match_'+Date.now();
+    const matchNum=(await getDocs(collection(db,'matches'))).size+1;
+    await setDoc(doc(db,'matches',mid),{
+      label,t1,t2,matchNum,
+      revealed:false,locked:false,finalized:false,
+      players:[],stats:{},teams:{},liveMatchId:'',
+      createdAt:serverTimestamp()
+    });
+    await updateDoc(doc(db,'meta','game'),{currentMatchId:mid});
+    currentMatchId=mid;
+    toast('Match created! Now load players.');
+  }
+  showScreen('admin');
+}
+
+// ── Finalize match → save to season ──
+async function finalizeMatch() {
+  if(!confirm('Finalize this match? Points will be saved to the season leaderboard.'))return;
+  const btn=document.getElementById('finalizeBtn');btn.textContent='Saving…';btn.disabled=true;
+  try {
+    const stats=currentMatch.stats||{};
+    const teams=currentMatch.teams||{};
+    const members=Object.keys(allMembers);
+    // Load current season totals
+    const stSnap=await getDoc(doc(db,'season','totals'));
+    const totals=stSnap.exists()?stSnap.data():{};
+
+    members.forEach(name=>{
+      const t=teams[name]||{};
+      const pts=memberMatchTotal(t,stats);
+      if(!totals[name]) totals[name]={total:0,matches:[]};
+      // Avoid double-counting if already finalized
+      const alreadySaved=totals[name].matches.some(m=>m.matchId===currentMatchId);
+      if(!alreadySaved){
+        totals[name].total=(totals[name].total||0)+pts;
+        totals[name].matches=[...(totals[name].matches||[]),{matchId:currentMatchId,label:currentMatch.label||'Match',pts}];
+      }
+    });
+
+    await setDoc(doc(db,'season','totals'),totals);
+    await updateDoc(doc(db,'matches',currentMatchId),{finalized:true});
+    stopAR();
+    toast('Match finalized! Points saved to season table ✅');
+    showScreen('admin');
+  } catch(e){toast('Error: '+e.message,'err');btn.textContent='✅ Finalize & Save to Season';btn.disabled=false;}
+}
+
+// ── Export CSV ──
+function exportCSV() {
+  const members=Object.keys(allMembers);
+  const rows=members.map(name=>{
+    const sd=seasonTotals[name]||{total:0,matches:[]};
+    return {name,teamName:allMembers[name]?.teamName||name,total:sd.total||0,matches:sd.matches||[]};
+  }).sort((a,b)=>b.total-a.total);
+  if(!rows.length){toast('No data to export','err');return;}
+  const matchCols=rows[0].matches.map(m=>m.label||'Match');
+  const header=['Rank','Name','Team',...matchCols,'Total'];
+  const lines=[header.join(','),...rows.map((r,i)=>[i+1,r.name,r.teamName,...r.matches.map(m=>m.pts),r.total].join(','))];
+  const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='ipl_fantasy_season.csv';a.click();
+  toast('CSV exported!');
+}
+
+function bindSave(){
+  document.querySelectorAll('.btn-save').forEach(btn=>{
+    btn.onclick=async()=>{
+      const p=btn.dataset.p; const data={...(playerStats[p]||{})};
+      document.querySelectorAll(`.si[data-p="${p}"]`).forEach(i=>{data[i.dataset.f]=parseFloat(i.value)||0;});
+      document.querySelectorAll(`.sic[data-p="${p}"]`).forEach(c=>{data[c.dataset.f]=c.checked;});
+      playerStats[p]=data;btn.textContent='Saving…';btn.disabled=true;
+      try {
+        await updateDoc(doc(db,'matches',currentMatchId),{[`stats.${p}`]:data});
+        btn.textContent='✓ Saved';btn.style.color='var(--green)';
+        setTimeout(()=>{btn.textContent='Save';btn.style.color='';btn.disabled=false;},1500);
+      } catch(e){toast('Error: '+e.message,'err');btn.textContent='Save';btn.disabled=false;}
+    };
+  });
+}
+
+// ── Cricket API ──
+async function fetchMatches() {
+  const key=document.getElementById('cricKey')?.value.trim()||metaGame.cricApiKey;
+  if(!key){toast('Enter API key first','err');return;}
+  const btn=document.getElementById('fetchMatchBtn');btn.textContent='Fetching…';btn.disabled=true;
+  try {
+    const res=await fetch(`https://api.cricapi.com/v1/currentMatches?apikey=${key}&offset=0`);
+    const data=await res.json();
+    if(data.status!=='success') throw new Error(data.reason||'API error');
+    const ipl=(data.data||[]).filter(m=>(m.name||'').toLowerCase().includes('ipl')||['Mumbai','Chennai','Bangalore','Kolkata','Delhi','Rajasthan','Hyderabad','Punjab','Lucknow','Gujarat'].some(t=>(m.name||'').includes(t)));
+    const list=document.getElementById('matchesList');
+    if(!ipl.length){list.innerHTML='<p class="muted">No IPL matches right now.</p>';return;}
+    list.innerHTML=ipl.map(m=>`
+    <div class="mopt">
+      <div><div class="mopt-name">${m.name||'Match'}</div><div class="mopt-st">${m.matchStarted&&!m.matchEnded?'🔴 LIVE':m.matchEnded?'✓ Ended':'Upcoming'}</div></div>
+      <button class="btn-sm" data-id="${m.id}" data-name="${m.name}">Select</button>
+    </div>`).join('');
+    list.querySelectorAll('button[data-id]').forEach(b=>{
+      b.onclick=async()=>{
+        const mid=b.dataset.id,mname=b.dataset.name;
+        await updateDoc(doc(db,'meta','game'),{cricApiKey:key});
+        await updateDoc(doc(db,'matches',currentMatchId),{liveMatchId:mid,label:mname});
+        document.getElementById('matchLbl').value=mname;
+        toast('Match selected! Loading players…');
+        await loadMatchPlayers(key,mid);
+      };
+    });
+  } catch(e){toast('Error: '+e.message,'err');}
+  finally{btn.textContent='Find IPL Matches';btn.disabled=false;}
+}
+
+async function loadMatchPlayers(key,mid) {
+  try {
+    const res=await fetch(`https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`);
+    const data=await res.json();
+    if(data.status!=='success') throw new Error('Match info unavailable');
+    const SQUAD={};
+    [{name:"Rohit Sharma",team:"MI",role:"BAT"},{name:"Suryakumar Yadav",team:"MI",role:"BAT"},{name:"Ishan Kishan",team:"MI",role:"WK"},{name:"Hardik Pandya",team:"MI",role:"AR"},{name:"Tilak Varma",team:"MI",role:"BAT"},{name:"Tim David",team:"MI",role:"BAT"},{name:"Jasprit Bumrah",team:"MI",role:"BOWL"},{name:"Trent Boult",team:"MI",role:"BOWL"},{name:"Naman Dhir",team:"MI",role:"AR"},{name:"Romario Shepherd",team:"MI",role:"AR"},{name:"MS Dhoni",team:"CSK",role:"WK"},{name:"Ruturaj Gaikwad",team:"CSK",role:"BAT"},{name:"Devon Conway",team:"CSK",role:"BAT"},{name:"Ravindra Jadeja",team:"CSK",role:"AR"},{name:"Shivam Dube",team:"CSK",role:"BAT"},{name:"Deepak Chahar",team:"CSK",role:"BOWL"},{name:"Matheesha Pathirana",team:"CSK",role:"BOWL"},{name:"Moeen Ali",team:"CSK",role:"AR"},{name:"Rachin Ravindra",team:"CSK",role:"BAT"},{name:"Virat Kohli",team:"RCB",role:"BAT"},{name:"Faf du Plessis",team:"RCB",role:"BAT"},{name:"Glenn Maxwell",team:"RCB",role:"AR"},{name:"Mohammed Siraj",team:"RCB",role:"BOWL"},{name:"Josh Hazlewood",team:"RCB",role:"BOWL"},{name:"Dinesh Karthik",team:"RCB",role:"WK"},{name:"Rajat Patidar",team:"RCB",role:"BAT"},{name:"Cameron Green",team:"RCB",role:"AR"},{name:"Shreyas Iyer",team:"KKR",role:"BAT"},{name:"Rinku Singh",team:"KKR",role:"BAT"},{name:"Andre Russell",team:"KKR",role:"AR"},{name:"Sunil Narine",team:"KKR",role:"AR"},{name:"Varun Chakravarthy",team:"KKR",role:"BOWL"},{name:"Mitchell Starc",team:"KKR",role:"BOWL"},{name:"Phil Salt",team:"KKR",role:"WK"},{name:"Angkrish Raghuvanshi",team:"KKR",role:"BAT"},{name:"Venkatesh Iyer",team:"KKR",role:"AR"},{name:"David Warner",team:"DC",role:"BAT"},{name:"Axar Patel",team:"DC",role:"AR"},{name:"Kuldeep Yadav",team:"DC",role:"BOWL"},{name:"Anrich Nortje",team:"DC",role:"BOWL"},{name:"Rishabh Pant",team:"DC",role:"WK"},{name:"Jake Fraser-McGurk",team:"DC",role:"BAT"},{name:"Tristan Stubbs",team:"DC",role:"BAT"},{name:"Sanju Samson",team:"RR",role:"WK"},{name:"Jos Buttler",team:"RR",role:"BAT"},{name:"Yashasvi Jaiswal",team:"RR",role:"BAT"},{name:"Ravichandran Ashwin",team:"RR",role:"AR"},{name:"Yuzvendra Chahal",team:"RR",role:"BOWL"},{name:"Shimron Hetmyer",team:"RR",role:"BAT"},{name:"Riyan Parag",team:"RR",role:"BAT"},{name:"Aiden Markram",team:"SRH",role:"BAT"},{name:"Heinrich Klaasen",team:"SRH",role:"WK"},{name:"Pat Cummins",team:"SRH",role:"AR"},{name:"Bhuvneshwar Kumar",team:"SRH",role:"BOWL"},{name:"Travis Head",team:"SRH",role:"BAT"},{name:"Abhishek Sharma",team:"SRH",role:"BAT"},{name:"T Natarajan",team:"SRH",role:"BOWL"},{name:"Nitish Kumar Reddy",team:"SRH",role:"AR"},{name:"Shikhar Dhawan",team:"PBKS",role:"BAT"},{name:"Sam Curran",team:"PBKS",role:"AR"},{name:"Arshdeep Singh",team:"PBKS",role:"BOWL"},{name:"Harshal Patel",team:"PBKS",role:"BOWL"},{name:"Jonny Bairstow",team:"PBKS",role:"WK"},{name:"Liam Livingstone",team:"PBKS",role:"AR"},{name:"Kagiso Rabada",team:"PBKS",role:"BOWL"},{name:"Prabhsimran Singh",team:"PBKS",role:"WK"},{name:"KL Rahul",team:"LSG",role:"WK"},{name:"Nicholas Pooran",team:"LSG",role:"WK"},{name:"Marcus Stoinis",team:"LSG",role:"AR"},{name:"Ravi Bishnoi",team:"LSG",role:"BOWL"},{name:"Avesh Khan",team:"LSG",role:"BOWL"},{name:"Krunal Pandya",team:"LSG",role:"AR"},{name:"Kyle Mayers",team:"LSG",role:"BAT"},{name:"Quinton de Kock",team:"LSG",role:"WK"},{name:"Shubman Gill",team:"GT",role:"BAT"},{name:"David Miller",team:"GT",role:"BAT"},{name:"Rashid Khan",team:"GT",role:"AR"},{name:"Mohammad Shami",team:"GT",role:"BOWL"},{name:"Wriddhiman Saha",team:"GT",role:"WK"},{name:"Noor Ahmad",team:"GT",role:"BOWL"},{name:"Azmatullah Omarzai",team:"GT",role:"AR"},{name:"B Sai Sudharsan",team:"GT",role:"BAT"}]
+    .forEach(p=>{SQUAD[p.name.toLowerCase()]={role:p.role,team:p.team,name:p.name};});
+
+    let players=[];
+    if(data.data?.players){players=data.data.players.map(p=>{const k=SQUAD[p.name?.toLowerCase()]||{};return{name:p.name,team:k.team||p.teamId||'',role:k.role||'BAT'};});}
+    else if(data.data?.squads){data.data.squads.forEach(sq=>{(sq.players||[]).forEach(p=>{const k=SQUAD[p.name?.toLowerCase()]||{};players.push({name:p.name,team:k.team||sq.teamId||'',role:k.role||'BAT'});});});}
+
+    if(players.length<5&&data.data?.teams){
+      const tns=data.data.teams;
+      players=Object.values(SQUAD).filter(v=>tns.some(t=>t.toLowerCase().includes(v.team.toLowerCase().substring(0,3))||v.team.toLowerCase().includes(t.toLowerCase().substring(0,3))));
+    }
+    if(players.length<5) throw new Error('Could not extract player list');
+
+    await updateDoc(doc(db,'matches',currentMatchId),{players});
+    matchPlayers=players;
+    toast(`✓ ${players.length} players loaded`);showScreen('admin');
+  } catch(e){toast('Could not load playing XI: '+e.message+'. Try after toss.','err');}
+}
+
+async function autoFetchStats(showFeedback=false) {
+  const key=metaGame.cricApiKey;
+  const mid=currentMatch.liveMatchId;
+  if(!key||!mid) return;
+  try {
+    const res=await fetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`);
+    const data=await res.json();
+    if(data.status!=='success') throw new Error(data.reason||'Scorecard unavailable');
+    const nl={};matchPlayers.forEach(p=>{nl[p.name.toLowerCase()]=p.name;});
+    const sc=data.data?.scorecard||[];let updated=0;
+    sc.forEach(inn=>{
+      (inn.batting||[]).forEach(b=>{
+        const raw=(b.batsman?.name||b.name||'').toLowerCase();
+        const m=Object.keys(nl).find(k=>k.includes(raw)||raw.includes(k));
+        if(!m)return;
+        playerStats[nl[m]]={...(playerStats[nl[m]]||{}),runs:b.r||0,balls:b.b||0,fours:b['4s']||0,sixes:b['6s']||0,batted:true,playingXI:true};updated++;
+      });
+      (inn.bowling||[]).forEach(bw=>{
+        const raw=(bw.bowler?.name||bw.name||'').toLowerCase();
+        const m=Object.keys(nl).find(k=>k.includes(raw)||raw.includes(k));
+        if(!m)return;
+        playerStats[nl[m]]={...(playerStats[nl[m]]||{}),wickets:bw.w||0,overs:parseFloat(bw.ov)||0,runsConceded:bw.r||0,maidens:bw.m||0,playingXI:true};updated++;
+      });
+    });
+    if(updated>0){
+      // Batch update stats into match doc
+      const statsUpdate={};
+      Object.entries(playerStats).forEach(([p,s])=>{statsUpdate[`stats.${p}`]=s;});
+      await updateDoc(doc(db,'matches',currentMatchId),statsUpdate);
+      const grid=document.getElementById('statsGrid');if(grid){grid.innerHTML=renderStatsGrid('');bindSave();}
+      const cd=document.getElementById('arCountdown');if(cd){const prev=cd.textContent;cd.textContent='✓ updated';setTimeout(()=>{cd.textContent=prev;},1500);}
+      if(showFeedback) toast(`✓ Stats updated for ${updated} entries`);
+    } else if(showFeedback) toast('No matching stats in scorecard yet','err');
+  } catch(e){if(showFeedback) toast('Error: '+e.message,'err');console.warn('Auto-fetch failed:',e.message);}
+}
+
+// ── Auto-refresh ──
+function startAR(secs){
+  stopAR(); arSecs=secs;
+  autoFetchStats();
+  arInterval=setInterval(()=>{autoFetchStats();arSecs=secs;},secs*1000);
+  arTimer=setInterval(()=>{arSecs=Math.max(0,arSecs-1);const el=document.getElementById('arCountdown');if(el)el.textContent=`next in ${arSecs}s`;},1000);
+}
+function stopAR(){
+  if(arInterval){clearInterval(arInterval);arInterval=null;}
+  if(arTimer){clearInterval(arTimer);arTimer=null;}arSecs=0;
+}
+
+// ── Helpers ──
+function nav(isAdmin=false){
+  return `<nav class="topnav">
+    <div class="nav-brand"><span class="b-ipl">IPL</span>${isAdmin?' <span class="admin-badge">Admin</span>':' Fantasy'}</div>
+    <div class="nav-r">${!isAdmin?`<span class="nav-u">👤 ${session.name}</span>`:''}
+    <button class="btn-ghost" id="logoutBtn">Sign out</button></div>
+  </nav>`;
+}
+function ln(n){return n.split(' ').pop();}
+function toast(msg,type='ok'){
+  let t=document.getElementById('toast');
+  t.textContent=msg;t.className=`toast show ${type==='err'?'toast-err':'toast-ok'}`;
+  clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',3200);
+}
+function renderLoading(){return`<div class="screen-center"><div class="blob"></div><div class="spinner"></div><p class="muted">Connecting…</p></div>`;}
+function showConfigError(){document.getElementById('app').innerHTML=`<div class="screen-center"><div class="cfg-err"><div style="font-size:48px">🔧</div><h2>Firebase Not Configured</h2><p>Open this file in a text editor and replace the <code>REPLACE_*</code> values with your Firebase config from Project Settings.</p></div></div>`;}
+function showError(m){document.getElementById('app').innerHTML=`<div class="screen-center"><p style="color:#ef4444">${m}</p></div>`;}
+</script>
+<style>
+:root{--bg:#07090f;--s1:#0d1018;--s2:#131824;--bd:#1c2438;--gold:#f2b411;--gold2:#d9a00e;--text:#e2e6f0;--muted:#52607a;--green:#22c55e;--red:#ef4444}
+*{box-sizing:border-box;margin:0;padding:0}html,body{min-height:100vh}
+body{background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;font-size:15px;line-height:1.5}
+body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 70% 50% at 50% -5%,rgba(242,180,17,.07),transparent 65%);pointer-events:none;z-index:0}
+#app{position:relative;z-index:1;min-height:100vh}
+.screen-center{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;position:relative;overflow:hidden}
+.screen-main{max-width:1200px;margin:0 auto;padding:0 16px 80px}
+.blob{position:absolute;width:700px;height:700px;background:radial-gradient(circle,rgba(242,180,17,.07),transparent 70%);top:-200px;left:50%;transform:translateX(-50%);pointer-events:none}
+.spinner{width:36px;height:36px;border:3px solid var(--bd);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.card{background:var(--s2);border:1px solid var(--bd);border-radius:20px;padding:32px 28px;width:100%;max-width:420px;position:relative;z-index:1}
+.brand{text-align:center;margin-bottom:4px}
+.b-ipl{font-family:'Bebas Neue',sans-serif;font-size:44px;color:var(--gold);letter-spacing:4px;margin-right:6px}
+.b-fl{font-family:'Bebas Neue',sans-serif;font-size:33px;letter-spacing:2px}
+.brand-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px}
+.seg{display:flex;background:var(--s1);border-radius:11px;padding:4px;gap:4px;margin-bottom:20px}
+.seg-btn{flex:1;background:transparent;border:none;color:var(--muted);padding:9px 8px;border-radius:8px;font-family:'Outfit',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s}
+.seg-btn.active{background:var(--gold);color:#000;font-weight:600}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.field label{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.3px}
+.field input,.field select{background:var(--s1);border:1.5px solid var(--bd);color:var(--text);padding:10px 13px;border-radius:10px;font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .2s;width:100%}
+.field input:focus,.field select:focus{border-color:var(--gold)}
+.hint{color:var(--muted);font-weight:400;font-size:11px}.fhint{font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.5}
+.pin-row{display:flex;gap:8px}
+.pd,.pj,.pr{flex:1;height:56px;background:var(--s1);border:1.5px solid var(--bd);color:var(--text);font-size:22px;text-align:center;border-radius:10px;outline:none;font-family:'Outfit',sans-serif;transition:border-color .2s;min-width:0}
+.pd:focus,.pj:focus,.pr:focus{border-color:var(--gold)}
+.btn-gold{background:var(--gold);color:#000;border:none;width:100%;padding:13px;border-radius:11px;font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;cursor:pointer;transition:background .15s,transform .1s;margin-top:4px}
+.btn-gold:hover{background:var(--gold2)}.btn-gold:active{transform:scale(.98)}
+.btn-ghost{background:transparent;border:1px solid var(--bd);color:var(--muted);padding:10px 16px;border-radius:10px;font-family:'Outfit',sans-serif;font-size:14px;cursor:pointer;transition:all .2s}
+.btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+.btn-sm{background:transparent;border:1px solid var(--bd);color:var(--muted);padding:7px 14px;border-radius:8px;font-family:'Outfit',sans-serif;font-size:13px;cursor:pointer;transition:all .2s}
+.btn-sm:hover{border-color:var(--gold);color:var(--gold)}
+.btn-warn{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171;padding:11px 18px;border-radius:9px;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;cursor:pointer;width:100%;transition:all .2s}
+.btn-warn:hover{background:rgba(239,68,68,.2)}
+.btn-reveal{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#000;border:none;padding:14px 18px;border-radius:10px;font-family:'Bebas Neue',sans-serif;font-size:21px;letter-spacing:1.5px;cursor:pointer;width:100%;transition:opacity .2s}
+.btn-reveal:hover{opacity:.9}
+.err{color:var(--red);font-size:13px;min-height:18px;margin-bottom:6px}
+.join-badge{font-family:'Bebas Neue',sans-serif;font-size:44px;letter-spacing:7px;color:var(--gold);text-align:center;background:rgba(242,180,17,.06);border:1px solid rgba(242,180,17,.2);border-radius:12px;padding:12px;margin:8px 0 18px}
+.jlink-box{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--bd);border-radius:9px;padding:10px 12px;font-size:12px;word-break:break-all;color:var(--muted)}
+.jlink-box span{flex:1}.btn-copy{background:var(--gold);color:#000;border:none;padding:5px 12px;border-radius:6px;font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.topnav{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--bd);margin-bottom:4px;position:sticky;top:0;background:rgba(7,9,15,.92);backdrop-filter:blur(12px);z-index:10}
+.nav-brand{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px}
+.admin-badge{font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;color:var(--gold);background:rgba(242,180,17,.12);padding:2px 8px;border-radius:5px;margin-left:6px;vertical-align:middle}
+.nav-r{display:flex;align-items:center;gap:10px}.nav-u{font-size:13px;color:var(--muted)}
+/* View tabs */
+.view-tabs{display:flex;gap:2px;border-bottom:1px solid var(--bd);margin-bottom:20px;overflow-x:auto}
+.vtab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);padding:10px 18px;font-family:'Outfit',sans-serif;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;margin-bottom:-1px;transition:all .2s}
+.vtab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.vtab:hover:not(.active){color:var(--text)}
+.match-bar{background:var(--s2);border:1px solid var(--bd);border-radius:12px;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:10px}
+.match-label-sm{font-size:10px;font-weight:600;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
+.match-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px}
+.pill{font-size:12px;font-weight:600;padding:4px 12px;border-radius:99px}
+.pill-green{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25)}
+.pill-red{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.25)}
+.info-banner{display:flex;align-items:center;gap:14px;padding:16px 20px;border-radius:12px;margin-bottom:16px;font-size:14px}
+.info-banner.green{background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2)}
+.info-banner.red{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2)}
+.info-banner.warn{background:rgba(242,180,17,.06);border:1px solid rgba(242,180,17,.2);color:rgba(242,180,17,.85)}
+.ib-icon{font-size:28px}.ib-title{font-weight:600;margin-bottom:2px}.ib-sub{font-size:13px;color:var(--muted)}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px}
+.pchip{background:var(--s2);border:1px solid var(--bd);padding:4px 11px;border-radius:7px;font-size:13px;font-weight:500}
+.pchip-c{border-color:var(--gold);color:var(--gold)}.pchip-vc{border-color:rgba(242,180,17,.4);color:rgba(242,180,17,.8)}
+.bh{margin-bottom:14px}
+.bh h2{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;display:flex;align-items:center;gap:10px}
+.ctr{font-size:16px;font-family:'Outfit',sans-serif;font-weight:600;color:var(--gold);background:rgba(242,180,17,.1);padding:2px 11px;border-radius:99px}
+.bh p{font-size:13px;color:var(--muted);margin-top:3px}
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.sinp{background:var(--s2);border:1.5px solid var(--bd);color:var(--text);padding:9px 13px;border-radius:9px;font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .2s;width:100%;margin-bottom:8px}
+.sinp:focus{border-color:var(--gold)}
+.rtabs{display:flex;gap:5px;flex-wrap:wrap}
+.rtab{background:var(--s1);border:1px solid var(--bd);color:var(--muted);padding:6px 13px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.rtab.active,.rtab:hover{border-color:var(--gold);color:var(--gold)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;margin-bottom:18px}
+.pcard{background:var(--s2);border:1.5px solid var(--bd);border-radius:11px;padding:12px 11px;cursor:pointer;transition:all .17s;position:relative;user-select:none}
+.pcard:hover:not(.pcard-dis){border-color:rgba(242,180,17,.5);transform:translateY(-2px)}
+.pcard-on{border-color:var(--gold);background:rgba(242,180,17,.07)}.pcard-dis{opacity:.35;cursor:not-allowed}
+.team-cap-badge{position:absolute;top:7px;right:7px;background:rgba(239,68,68,.85);color:#fff;font-size:9px;font-weight:700;padding:2px 5px;border-radius:4px;letter-spacing:.5px}
+.team-cnt{color:var(--gold);font-size:10px;font-weight:700;margin-left:3px}
+.pchk{position:absolute;top:8px;right:8px;background:var(--gold);color:#000;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
+.pc-role{font-size:11px;color:var(--muted);font-weight:600;margin-bottom:3px}.pc-name{font-size:13px;font-weight:600;line-height:1.3;margin-bottom:2px}.pc-team{font-size:11px;color:var(--muted)}
+.empty-hint{text-align:center;color:var(--muted);padding:36px 0;font-size:14px}.need-more{text-align:center;color:var(--muted);font-size:14px;padding:13px}
+.xi-panel{background:var(--s2);border:1px solid var(--bd);border-radius:13px;padding:18px;margin-bottom:20px}
+.xi-title{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:1px;color:var(--gold);margin-bottom:10px}
+.xi-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:13px}
+.xchip{background:var(--s1);border:1px solid var(--bd);padding:4px 9px;border-radius:7px;font-size:13px;display:inline-flex;align-items:center;gap:3px}
+.xchip b{font-weight:700;font-size:11px}.xchip-c{border-color:var(--gold);color:var(--gold)}.xchip-vc{border-color:rgba(242,180,17,.4);color:rgba(242,180,17,.8)}
+.cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:13px}
+.cs{display:flex;flex-direction:column;gap:4px}.cs label{font-size:11px;font-weight:600;color:var(--muted)}
+.cs select{background:var(--s1);border:1.5px solid var(--bd);color:var(--text);padding:8px 9px;border-radius:8px;font-family:'Outfit',sans-serif;font-size:13px;outline:none}
+.cs select:focus{border-color:var(--gold)}.btn-lock{font-size:18px;padding:13px;margin-top:2px}
+/* Leaderboard */
+.reveal-banner{background:linear-gradient(135deg,rgba(242,180,17,.15),rgba(242,180,17,.04));border:1px solid rgba(242,180,17,.3);border-radius:14px;padding:22px;text-align:center;margin-bottom:22px}
+.rb-eye{font-size:11px;font-weight:700;letter-spacing:2.5px;color:var(--gold);margin-bottom:6px}
+.rb-title{font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px}.rb-sub{font-size:13px;color:var(--muted);margin-top:4px}
+.lb-list{display:flex;flex-direction:column;gap:10px}
+.lb-card{background:var(--s2);border:1px solid var(--bd);border-radius:13px;padding:16px 18px;display:flex;align-items:flex-start;gap:14px;transition:all .2s}
+.lb-me{border-color:rgba(242,180,17,.4);background:rgba(242,180,17,.04)}.lb-top{border-color:rgba(242,180,17,.5)}
+.lb-med{font-size:26px;min-width:32px;text-align:center;padding-top:2px}
+.lb-body{flex:1;min-width:0}.lb-name{font-weight:600;font-size:16px;display:flex;align-items:center;gap:7px;margin-bottom:2px}
+.you{background:rgba(242,180,17,.18);color:var(--gold);font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;font-family:'Outfit',sans-serif}
+.lb-tname{font-size:12px;color:var(--muted);margin-bottom:8px}
+.lb-chips{display:flex;flex-wrap:wrap;gap:5px}
+.lchip{background:var(--s1);border:1px solid var(--bd);padding:3px 7px;border-radius:6px;font-size:12px;display:inline-flex;align-items:center;gap:3px}
+.lchip-c{border-color:var(--gold);color:var(--gold)}.lchip-vc{border-color:rgba(242,180,17,.4)}
+.lchip em{font-style:normal;color:var(--gold);font-weight:700;font-size:11px}
+.lb-score{font-family:'Bebas Neue',sans-serif;font-size:38px;color:var(--gold);text-align:right;min-width:80px;line-height:1}
+.lb-score span{font-size:12px;color:var(--muted);display:block;font-family:'Outfit',sans-serif;font-weight:400}
+.muted-s{color:var(--muted);font-size:12px}
+/* Season */
+.season-header{margin-bottom:20px}
+.sh-title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px}.sh-sub{color:var(--muted);font-size:13px;margin-top:2px}
+.season-cards{display:flex;flex-direction:column;gap:10px}
+.sc-card{background:var(--s2);border:1px solid var(--bd);border-radius:13px;padding:16px 18px;display:flex;align-items:flex-start;gap:14px}
+.sc-me{border-color:rgba(242,180,17,.4);background:rgba(242,180,17,.04)}.sc-first{border-color:rgba(242,180,17,.5)}
+.sc-rank{font-size:26px;min-width:32px;text-align:center;padding-top:2px}
+.sc-body{flex:1;min-width:0}.sc-name{font-weight:600;font-size:16px;display:flex;align-items:center;gap:7px;margin-bottom:2px}
+.sc-tname{font-size:12px;color:var(--muted);margin-bottom:8px}
+.sc-history{display:flex;flex-wrap:wrap;gap:5px}
+.sc-mpill{background:var(--s1);border:1px solid var(--bd);padding:3px 8px;border-radius:6px;font-size:12px;color:var(--muted)}
+.sc-mpill b{color:var(--gold)}
+.sc-total{font-family:'Bebas Neue',sans-serif;font-size:38px;color:var(--gold);text-align:right;min-width:80px;line-height:1}
+.sc-total span{font-size:12px;color:var(--muted);display:block;font-family:'Outfit',sans-serif;font-weight:400}
+/* History table */
+.history-section{margin-top:24px}.hs-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;margin-bottom:12px}
+.table-wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:10px}
+.hist-table{width:100%;border-collapse:collapse;font-size:13px}
+.hist-table th{background:var(--s1);padding:10px 14px;text-align:left;color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.5px;border-bottom:1px solid var(--bd)}
+.hist-table td{padding:10px 14px;border-bottom:1px solid rgba(28,36,56,.5)}
+.hist-table tr:last-child td{border-bottom:none}
+.hist-table tr:hover td{background:rgba(242,180,17,.03)}
+.tr-me td{background:rgba(242,180,17,.04)!important}
+.td-name{font-weight:600}.td-pts{text-align:center;color:var(--gold);font-weight:600}.td-total{text-align:center;font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--gold)}
+/* Admin layout */
+.admin-2col{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start}
+@media(max-width:860px){.admin-2col{grid-template-columns:1fr}}
+.acol{display:flex;flex-direction:column;gap:14px}
+.acard{background:var(--s2);border:1px solid var(--bd);border-radius:13px;padding:18px}
+.acard-t{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:1px;color:var(--gold);margin-bottom:12px}
+.acard-hrow{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.acard-hrow .acard-t{margin-bottom:0}
+.alink{color:var(--gold);font-size:11px;text-decoration:none;margin-left:5px}
+.srow{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--bd);font-size:14px}
+.srow:last-of-type{border-bottom:none}.ctrl-btns{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+.mrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);font-size:14px}.mrow:last-child{border-bottom:none}
+.mrow-r{min-width:26px;font-size:14px}.mrow-n{flex:1;font-weight:500}.mrow-s{font-size:12px;font-weight:600}.s-yes{color:var(--green)}.s-no{color:var(--muted)}.mrow-p{font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--gold)}
+.muted{color:var(--muted);font-size:13px}
+.mopt{background:var(--s1);border:1px solid var(--bd);border-radius:9px;padding:10px 12px;margin-bottom:7px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mopt-name{font-size:13px;font-weight:500;margin-bottom:2px}.mopt-st{font-size:11px;color:var(--muted)}
+.pool-chips{display:flex;flex-wrap:wrap;gap:5px}
+.pool-chip{background:var(--s1);border:1px solid var(--bd);padding:3px 9px;border-radius:6px;font-size:12px}
+.pool-chip em{color:var(--muted);font-style:normal;font-size:11px;margin-left:3px}
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:11px;max-height:640px;overflow-y:auto;padding-right:3px;margin-top:10px}
+.stat-card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:13px}
+.sc-hd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.sc-nm{font-weight:600;font-size:13px;margin-bottom:2px}.sc-tm{font-size:11px;color:var(--muted)}
+.sc-pts{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--muted)}.sc-pts-on{color:var(--gold)}
+.sc-inp{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:7px}
+.si-g{display:flex;flex-direction:column;gap:2px}.si-g label{font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase}
+.si{background:var(--s2);border:1px solid var(--bd);color:var(--text);padding:5px 3px;border-radius:5px;font-size:12px;width:100%;outline:none;text-align:center;font-family:'Outfit',sans-serif}
+.si:focus{border-color:var(--gold)}
+.sc-chk{display:flex;gap:12px;font-size:12px;color:var(--muted);margin-bottom:8px}
+.sc-chk label{display:flex;align-items:center;gap:4px;cursor:pointer}
+.btn-save{background:rgba(242,180,17,.08);border:1px solid rgba(242,180,17,.25);color:var(--gold);padding:7px;border-radius:7px;font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;cursor:pointer;width:100%;transition:all .2s}
+.btn-save:hover{background:rgba(242,180,17,.16)}
+/* AR toggle */
+.ar-wrap{display:flex;align-items:center;gap:6px;background:var(--s1);border:1px solid var(--bd);border-radius:9px;padding:5px 10px;flex-wrap:wrap}
+.ar-lbl{font-size:12px;color:var(--muted);white-space:nowrap}
+.ar-sel{background:transparent;border:none;color:var(--text);font-family:'Outfit',sans-serif;font-size:13px;outline:none;cursor:pointer;padding:2px 4px}
+.ar-sel option{background:var(--s2)}
+.ar-btn{border:none;border-radius:6px;padding:4px 10px;font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.ar-on{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}.ar-off{background:rgba(82,96,122,.15);color:var(--muted);border:1px solid var(--bd)}
+.ar-cd{font-size:11px;color:var(--muted);white-space:nowrap;min-width:70px}
+/* Empty state */
+.empty-state{text-align:center;padding:60px 20px}
+.es-icon{font-size:48px;margin-bottom:12px;opacity:.5}
+.empty-state p{color:var(--text);font-size:15px;margin-bottom:6px}
+/* Config err */
+.cfg-err{background:var(--s2);border:1px solid var(--bd);border-radius:16px;padding:32px;max-width:480px;text-align:center;z-index:1}
+.cfg-err h2{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--gold);letter-spacing:1px;margin:12px 0 10px}
+.cfg-err p{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:8px}
+.cfg-err code{background:var(--s1);padding:2px 6px;border-radius:4px;color:var(--gold);font-size:13px}
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;padding:11px 18px;border-radius:9px;font-size:14px;z-index:999;opacity:0;transform:translateY(6px);transition:all .25s;pointer-events:none;background:var(--s2);border:1px solid var(--bd)}
+.toast.show{opacity:1;transform:translateY(0)}.toast-ok{border-color:rgba(34,197,94,.4);color:var(--green)}.toast-err{border-color:rgba(239,68,68,.4);color:#f87171}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+@media(max-width:600px){.card{padding:24px 18px}.cap-grid{grid-template-columns:1fr}.pgrid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}.lb-score,.sc-total{font-size:30px;min-width:60px}.view-tabs{gap:0}.vtab{padding:10px 12px;font-size:13px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+</body>
+</html>
