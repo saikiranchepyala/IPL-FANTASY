@@ -1,7 +1,6 @@
 name: Verify IPL Dashboard
 on: [push]
 
-# This is the "Secret Sauce" to opt into Node 24 early
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -12,11 +11,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Dependencies
-        run: |
-          npm install eslint@10.2.0 eslint-plugin-html globals --save-dev
+        run: npm install eslint@10.2.0 eslint-plugin-html globals --save-dev
 
       - name: Run HTML Validation
         run: npx htmlhint ipl-fantasy-v4_render.html
 
       - name: Run JS Syntax Check
-        run: npx eslint ipl-fantasy-v4_render.html --config eslint.config.mjs
+        # Since the config is in the root, we don't even need the --config flag!
+        run: npx eslint ipl-fantasy-v4_render.html
