@@ -13,6 +13,5 @@ jobs:
       - name: Run HTML Validation
         run: npx htmlhint ipl-fantasy-v4_render.html
 
-      - name: Run JS Syntax Check (Extract from HTML)
-        run: |
-          npx eslint --plugin html --rule '{"no-undef": "off"}' --ext .html ipl-fantasy-v4_render.html
+      - name: Run JS Syntax Check (v10 Flat Config)
+        run: npx eslint ipl-fantasy-v4_render.html
