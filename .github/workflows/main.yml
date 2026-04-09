@@ -6,12 +6,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
-      # 1. Check for basic HTML errors
-      - name: HTML Hint
+
+      - name: Install Linting Tools
+        run: npm install eslint eslint-plugin-html htmlhint --save-dev
+
+      - name: Run HTML Validation
         run: npx htmlhint ipl-fantasy-v4_render.html
 
-      # 2. Check for JS syntax errors
-      - name: JS Syntax Check
-        run: node --check ipl-fantasy-v4_render.html 
-        # Note: This works if your JS is inside <script> tags
+      - name: Run JS Syntax Check (Extract from HTML)
+        run: |
+          npx eslint --plugin html --rule '{"no-undef": "off"}' --ext .html ipl-fantasy-v4_render.html
