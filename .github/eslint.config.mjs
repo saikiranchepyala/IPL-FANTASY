@@ -1,4 +1,5 @@
 import html from "eslint-plugin-html";
+import globals from "globals";
 
 export default [
   {
@@ -8,12 +9,9 @@ export default [
     },
     languageOptions: {
       globals: {
-        // This stops the "firebase is not defined" errors
+        ...globals.browser,
         firebase: "readonly",
-        google: "readonly",
-        window: "readonly",
-        document: "readonly",
-        console: "readonly"
+        google: "readonly"
       }
     },
     rules: {
