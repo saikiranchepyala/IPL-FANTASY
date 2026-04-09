@@ -15,4 +15,5 @@ jobs:
         run: npx htmlhint ipl-fantasy-v4_render.html
 
       - name: Run JS Syntax Check
-        run: npx eslint ipl-fantasy-v4_render.html
+        # We add --config to leave no room for doubt
+        run: npx eslint ipl-fantasy-v4_render.html --config eslint.config.mjs
