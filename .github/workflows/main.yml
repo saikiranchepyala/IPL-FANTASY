@@ -5,13 +5,14 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install Linting Tools
-        run: npm install eslint eslint-plugin-html htmlhint --save-dev
+      - name: Install Dependencies
+        run: |
+          npm install eslint@10.2.0 eslint-plugin-html globals --save-dev
 
       - name: Run HTML Validation
         run: npx htmlhint ipl-fantasy-v4_render.html
 
-      - name: Run JS Syntax Check (v10 Flat Config)
+      - name: Run JS Syntax Check
         run: npx eslint ipl-fantasy-v4_render.html
