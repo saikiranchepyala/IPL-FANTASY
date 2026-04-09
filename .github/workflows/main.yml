@@ -1,6 +1,10 @@
 name: Verify IPL Dashboard
 on: [push]
 
+# This is the "Secret Sauce" to opt into Node 24 early
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -15,5 +19,4 @@ jobs:
         run: npx htmlhint ipl-fantasy-v4_render.html
 
       - name: Run JS Syntax Check
-        # We add --config to leave no room for doubt
         run: npx eslint ipl-fantasy-v4_render.html --config eslint.config.mjs
