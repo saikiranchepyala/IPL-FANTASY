@@ -158,14 +158,6 @@
         return Math.round(p);
       }
 
-      window.setStrikerOverride = function(name) {
-        if (!name) return;
-        // This is a UI-only override for the live score bar
-        // In a real multi-user app, this might sync to DB, but here we just toast/log
-        console.log("Striker override:", name);
-        toast(`Viewing stats for ${name}`);
-      };
-
       function memberMatchTotal(team, stats) {
         return Math.round(
           (team.players || []).reduce((acc, p) => {
@@ -254,6 +246,9 @@
       let curRole = "ALL",
         curSearch = ""; // persist across member re-renders
       let xiRetryCount = 0; // reset on each match switch
+      let _pitchViewActive = false; // toggles between leaderboard and pitch view
+      let _pvPrevPts = {}; // previous pts snapshot for delta animation
+      let _pvMatchCache = {}; // matchId → match data for member pitch overlay
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
       let _matchType = "ipl"; // 'ipl' | 'international' | 'domestic'
 
@@ -482,13 +477,9 @@
       function _doRefresh() {
         _refreshTimer = null;
         const sy = window.scrollY;
-        // Refresh score pill in place (it lives outside admin/member-body)
-        const _spEl = document.getElementById("scorePill");
-        if (_spEl) {
-          const _newPill = renderScorePill();
-          if (_newPill) _spEl.outerHTML = _newPill;
-          else _spEl.style.display = "none";
-        }
+        // Refresh score pill — wrapper always exists in nav so we update innerHTML, not outerHTML
+        const _spWrap = document.getElementById("scorePillWrap");
+        if (_spWrap) _spWrap.innerHTML = renderScorePill();
         injectTeamAmbient(getMatch(getActiveMid()));
 
         if (session.isAdmin && !session.name) {
@@ -921,12 +912,8 @@
         sessionSave();
 
         // Update score pill and ambient colors immediately
-        const scorePillEl = document.getElementById("scorePill");
-        if (scorePillEl) {
-          const newPill = renderScorePill();
-          if (newPill) scorePillEl.outerHTML = newPill;
-          else scorePillEl.style.display = "none";
-        }
+        const scorePillEl = document.getElementById("scorePillWrap");
+        if (scorePillEl) scorePillEl.innerHTML = renderScorePill();
         injectTeamAmbient(getMatch(mid));
 
         // Preserve current tab (e.g. history) unless it's a detail view; default to team
@@ -1334,7 +1321,10 @@
 
         let contextLine = status || "Live Updates";
         if (match.finalized) {
-          contextLine = `Final Result: ${status || 'Match Over'}`;
+          contextLine = `Final Result: ${match.matchResult || status || 'Match Over'}`;
+        } else if (match.matchEnded) {
+          // Match concluded but not yet finalized — show winner from matchResult, not the hardcoded "Match Concluded"
+          contextLine = match.matchResult || status || "Match Concluded";
         } else if (isLive && scores.length === 2) {
           // Build team-key lookup early so RRR uses correct innings regardless of API order
           const _rrScoreByTeam = {};
@@ -1374,7 +1364,9 @@
           { key: t1Key, fallbackScore: scores[0], color: homeColor, zoneClass: 'csb-home-zone' },
           { key: t2Key, fallbackScore: scores[1], color: awayColor, zoneClass: 'csb-away-zone' },
         ].map(({ key, fallbackScore, color, zoneClass }, idx) => {
-          // Primary: match score by team key. Fallback: use array index only when key lookup didn't work at all.
+          // Primary: match score by team key.
+          // When lookup worked, only use that team's actual score — don't bleed another team's score in.
+          // When lookup failed entirely, fall back to positional index.
           const s = lookupWorked && key
             ? (scoreByTeam[key] || { r: 0, w: 0, o: 0 })
             : (fallbackScore || { r: 0, w: 0, o: 0 });
@@ -1434,6 +1426,127 @@
           </div>`;
       }
 
+      // ── Pitch View ──────────────────────────────────────────
+      function renderPitchView(match, userTeam) {
+        const stats   = match.stats  || {};
+        const players = match.players || [];
+        const pStatus = match.playerStatus || {};
+
+        const cap     = userTeam?.captain || '';
+        const vc      = userTeam?.vc || '';
+        const myPicks = new Set(userTeam?.players || []);
+
+        // Show only this user's fantasy picks
+        const xi = myPicks.size > 0
+          ? players.filter(p => myPicks.has(p.name))
+          : players.filter(p => pStatus[p.name] === 'playing' || pStatus[p.name] === 'impact');
+
+        function getPts(name) {
+          let p = calcPoints(stats[name] || {});
+          if (name === cap) p *= 2;
+          else if (name === vc) p *= 1.5;
+          return Math.round(p);
+        }
+
+        const totalPts = xi.reduce((sum, p) => sum + getPts(p.name), 0);
+
+        // Live active players
+        const batsmen    = match.currentBatsmen || [];
+        const bowler     = match.currentBowler  || null;
+        const strikerName = batsmen.find(b => b.strike)?.name || batsmen[0]?.name || '';
+        const bowlerName  = bowler?.name || '';
+
+        // Snapshot prev pts for delta; update after render
+        const prevPts = { ..._pvPrevPts };
+
+        function playerCard(p) {
+          const isCap = p.name === cap;
+          const isVC  = p.name === vc;
+          const pts_val = getPts(p.name);
+
+          // Points delta animation
+          const prev  = prevPts[p.name] ?? null;
+          const delta = prev !== null ? pts_val - prev : 0;
+          const deltaAttr  = delta > 0 ? `data-delta="+${delta}"` : '';
+          const risingClass = delta > 0 ? ' pv2-pts-rising' : '';
+
+          // Live role highlights
+          const isStriker = p.name === strikerName;
+          const isBowling = p.name === bowlerName;
+          const avatarExtra = isStriker ? ' pv2-av-striker' : isBowling ? ' pv2-av-bowler' : '';
+
+          // "Virat Kohli" → "V. Kohli"
+          const parts = p.name.trim().split(/\s+/);
+          const displayName = parts.length > 1
+            ? parts[0][0] + '. ' + parts.slice(1).join(' ')
+            : p.name;
+
+          // Initials for avatar circle
+          const initials = parts.length > 1
+            ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+            : p.name.substring(0, 2).toUpperCase();
+
+          const capBadge = isCap
+            ? '<span class="pv2-badge pv2-cap">C</span>'
+            : isVC
+              ? '<span class="pv2-badge pv2-vc">VC</span>'
+              : '';
+          const multiplierLabel = isCap ? ' <span class="pv2-mult">2x</span>' : isVC ? ' <span class="pv2-mult">1.5x</span>' : '';
+
+          return `
+            <div class="pv2-player">
+              <div class="pv2-avatar-wrap">
+                <div class="pv2-avatar${avatarExtra}">${initials}</div>
+                ${capBadge}
+              </div>
+              <div class="pv2-name">${displayName}</div>
+              <div class="pv2-pts${risingClass}" ${deltaAttr}>${pts_val} pts${multiplierLabel}</div>
+            </div>`;
+        }
+
+        const wks   = xi.filter(p => p.role === 'WK');
+        const bats  = xi.filter(p => p.role === 'BAT');
+        const ars   = xi.filter(p => p.role === 'AR');
+        const bowls = xi.filter(p => p.role === 'BOWL');
+
+        function roleSection(label, group) {
+          if (!group.length) return '';
+          return `
+            <div class="pv2-section">
+              <div class="pv2-role-label">${label}</div>
+              <div class="pv2-row">${group.map(playerCard).join('')}</div>
+            </div>`;
+        }
+
+        // Update prev pts snapshot for next render's delta detection
+        xi.forEach(p => { _pvPrevPts[p.name] = getPts(p.name); });
+
+        return `
+          <div class="pv2-outer">
+            <div class="pv2-ground">
+              <!-- realistic pitch in center -->
+              <div class="pv2-pitch-strip">
+                <div class="pv2-pitch-inner">
+                  <div class="pv2-stumps pv2-stumps-top"></div>
+                  <div class="pv2-stumps pv2-stumps-bot"></div>
+                  <div class="pv2-return-crease pv2-rc-tl"></div>
+                  <div class="pv2-return-crease pv2-rc-tr"></div>
+                  <div class="pv2-return-crease pv2-rc-bl"></div>
+                  <div class="pv2-return-crease pv2-rc-br"></div>
+                </div>
+              </div>
+              <!-- player rows on top -->
+              <div class="pv2-content">
+                <div class="pv2-total-bar">Total: <b>${totalPts} pts</b></div>
+                ${roleSection('WICKET KEEPERS', wks)}
+                ${roleSection('BATTERS', bats)}
+                ${roleSection('ALL ROUNDERS', ars)}
+                ${roleSection('BOWLERS', bowls)}
+              </div>
+            </div>
+          </div>`;
+      }
+
       function renderLiveTab() {
         const liveMid = memberSelectedMatchId || currentMatchId;
         const liveMatch = getMatch(liveMid);
@@ -1446,10 +1559,53 @@
             scoreBar +
             `<div class="empty-state"><div class="es-icon">🔒</div><p>Fantasy leaderboard appears once the match starts.</p></div>`
           );
-        return (
-          scoreBar + renderMatchLeaderboard(liveMatch, liveMid, session.name)
-        );
+
+        const userTeam = (liveMatch.teams || {})[session.name] || {};
+        const toggleBtn = `
+          <div class="pv-toggle-row">
+            <button class="pv-toggle-btn ${_pitchViewActive ? '' : 'pv-toggle-active'}"
+              onclick="window._setPitchView(false)">📊 Leaderboard</button>
+            <button class="pv-toggle-btn ${_pitchViewActive ? 'pv-toggle-active' : ''}"
+              onclick="window._setPitchView(true)">🏟 Pitch View</button>
+          </div>`;
+
+        const body = _pitchViewActive
+          ? renderPitchView(liveMatch, userTeam)
+          : renderMatchLeaderboard(liveMatch, liveMid, session.name);
+
+        return scoreBar + toggleBtn + body;
       }
+
+      window._setPitchView = function(active) {
+        _pitchViewActive = active;
+        refreshView();
+      };
+
+      window._viewMemberPitch = function(mid, memberName) {
+        const match = _pvMatchCache[mid] || getMatch(mid);
+        if (!match || !match.label) { toast('Match data not available', 'err'); return; }
+        const memberTeam = (match.teams || {})[memberName] || {};
+        if (!memberTeam.players?.length) { toast('No team found for ' + memberName, 'err'); return; }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'history-overlay';
+        overlay.innerHTML = `
+          <div class="history-modal">
+            <div class="hm-header">
+              <div class="hm-title">${memberName}'s Pitch</div>
+              <button class="hm-close" onclick="this.closest('.history-overlay').remove()">×</button>
+            </div>
+            <div class="hm-body">
+              ${renderPitchView(match, memberTeam)}
+            </div>
+          </div>`;
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => {
+          const modal = overlay.querySelector('.history-modal');
+          if (modal) modal.classList.add('sheet-open');
+        });
+      };
 
       function renderMatchLeaderboard(match, mid, highlightName) {
         const stats = match.stats || {};
@@ -1488,6 +1644,9 @@
     ${match.locked ? '<div class="rb-live-badge">LIVE</div>' : ""}
   </div>`;
 
+        // Cache match data so _viewMemberPitch can access it
+        if (mid) _pvMatchCache[mid] = match;
+
         return `${bannerHtml}
   <div class="lb-list">
     ${ranked
@@ -1496,7 +1655,7 @@
           const rankClass = match.finalized ? (i===0?'lb-top-1 lb-top':i===1?'lb-top-2':i===2?'lb-top-3':'') : (i===0?'lb-top':'');
           const medalClass = i===0 ? 'lb-med-1' : '';
           const delay = match.finalized ? `animation-delay:${0.5 + i * 0.15}s` : `animation-delay:${i * 0.08}s`;
-          
+
           // Points flash check
           const scoreKey = mid + "_" + r.name;
           const prevPts = prevScores[scoreKey];
@@ -1504,12 +1663,18 @@
           if (match.locked && !match.finalized) prevScores[scoreKey] = r.total;
           const flashClass = hasChanged ? 'animation: ptsFlash 1.5s ease both;' : '';
 
+          const safeN = r.name.replace(/'/g, "\\'");
           return `
     <div class="lb-card ${r.name === highlightName ? "lb-me" : ""} ${rankClass}" style="${delay}">
       <div class="lb-med ${medalClass}">${medals[i] || "#" + (i + 1)}</div>
       <div class="lb-body">
-        <div class="lb-name">${r.name}${r.name === highlightName ? ' <span class="you">YOU</span>' : ""}</div>
-        <div class="lb-tname">${r.teamName}</div>
+        <div class="lb-name-row">
+          <div>
+            <div class="lb-name">${r.name}${r.name === highlightName ? ' <span class="you">YOU</span>' : ""}</div>
+            <div class="lb-tname">${r.teamName}</div>
+          </div>
+          ${r.team.players?.length ? `<button class="lb-pitch-btn" onclick="window._viewMemberPitch('${mid}','${safeN}')" title="View ${r.name}'s pitch">🏟</button>` : ''}
+        </div>
         <div class="lb-chips">
           ${
             (r.team.players || [])
@@ -1674,6 +1839,27 @@
         catch(e) { toast('Could not load match', 'err'); return; }
         if (!snap.exists()) { toast('Match data not available', 'err'); return; }
         const match = { ...snap.data(), stats: snap.data().stats || {}, teams: snap.data().teams || {} };
+        _pvMatchCache[matchId] = match; // cache so lb-card pitch buttons work
+
+        function _renderHistoryBody(pitchActive) {
+          const userTeam = (match.teams || {})[session.name] || {};
+          const toggleBtn = `
+            <div class="pv-toggle-row">
+              <button class="pv-toggle-btn ${pitchActive ? '' : 'pv-toggle-active'}"
+                onclick="window._setHistoryPitchView(false)">📊 Leaderboard</button>
+              <button class="pv-toggle-btn ${pitchActive ? 'pv-toggle-active' : ''}"
+                onclick="window._setHistoryPitchView(true)">🏟 Pitch View</button>
+            </div>`;
+          const body = pitchActive
+            ? renderPitchView(match, userTeam)
+            : renderMatchLeaderboard(match, matchId, session.name);
+          return toggleBtn + body;
+        }
+
+        window._setHistoryPitchView = function(active) {
+          const hmBody = document.querySelector('.history-overlay .hm-body');
+          if (hmBody) hmBody.innerHTML = _renderHistoryBody(active);
+        };
 
         const overlay = document.createElement('div');
         overlay.className = 'history-overlay';
@@ -1684,7 +1870,7 @@
               <button class="hm-close" onclick="this.closest('.history-overlay').remove()">×</button>
             </div>
             <div class="hm-body">
-              ${renderMatchLeaderboard(match, matchId, session.name)}
+              ${_renderHistoryBody(false)}
             </div>
           </div>`;
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
@@ -2977,15 +3163,8 @@
         xiRetryCount = 0;
         syncDerivedState();
         // Update score pill and ambient colors immediately — they live outside admin-body
-        const scorePillEl = document.getElementById("scorePill");
-        if (scorePillEl) {
-          const newPill = renderScorePill();
-          if (newPill) {
-            scorePillEl.outerHTML = newPill;
-          } else {
-            scorePillEl.style.display = "none";
-          }
-        }
+        const scorePillEl = document.getElementById("scorePillWrap");
+        if (scorePillEl) scorePillEl.innerHTML = renderScorePill();
         injectTeamAmbient(getMatch(mid));
         const adminBody = document.getElementById("admin-body");
         if (adminBody) {
@@ -3343,6 +3522,15 @@
       </div>
       <textarea id="pasteScorecardBox" placeholder="Paste Cricbuzz or ESPN scorecard text here..." style="width:100%; height:80px; background:var(--bg); border:1px solid var(--bd); color:var(--text); padding:8px; border-radius:var(--radius); font-size:12px; font-family:monospace; resize:vertical;"></textarea>
       <p class="muted" style="font-size:11px; margin-top:6px;">Instantly parses copied Batting and Bowling rows to fill the grid. Don't forget to push 'Save All' afterwards.</p>
+    </div>
+
+    <div style="margin: 12px 0; padding: 12px; background: rgba(245, 158, 11, 0.04); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: var(--radius);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-family:'Barlow Condensed', sans-serif; font-weight:700; color:var(--gold); text-transform:uppercase; letter-spacing:0.5px;">🔌 Paste CricAPI JSON (API Lag Fix)</span>
+        <button class="btn-sm" onclick="parseJsonScorecard()" style="background:rgba(245,158,11,0.15); color:var(--gold); border-color:rgba(245,158,11,0.3);">Parse JSON</button>
+      </div>
+      <textarea id="pasteJsonScorecardBox" placeholder='Paste full match_scorecard or match_info JSON from CricAPI here...' style="width:100%; height:80px; background:var(--bg); border:1px solid var(--bd); color:var(--text); padding:8px; border-radius:var(--radius); font-size:12px; font-family:monospace; resize:vertical;"></textarea>
+      <p class="muted" style="font-size:11px; margin-top:6px;">Paste the raw JSON from CricAPI. Extracts batting, bowling, catching stats + live score. Press 'Save All' after.</p>
     </div>
 
     <input class="sinp" id="statsSearch" placeholder="🔍 Search player…">
@@ -3753,7 +3941,7 @@
               const winTag = isSeasonHigh ? ' sc-pill-season-high' : isWinner ? ' sc-pill-winner' : '';
               const badge = isSeasonHigh ? ' 👑' : isWinner ? ' ★' : '';
               const shortLabel = (m.label || '').split('–')[0].trim().substring(0, 8);
-              return `<span class="sc-mpill${winTag}" title="${escAttr(m.label)}">${shortLabel}: <b>${m.pts}</b>${badge}</span>`;
+              return `<span class="sc-mpill${winTag}" title="${escAttr(m.label)}">${shortLabel}: <b>${m.pts}pts</b>${badge}</span>`;
             }).join('');
             return `
       <div class="sc-card ${i === 0 ? "sc-first" : ""}">
@@ -3907,10 +4095,19 @@
             p.name.toLowerCase().includes(search.toLowerCase()) ||
             p.team.toLowerCase().includes(search.toLowerCase()),
         );
-        if (!pool.length)
-          return `<div class="muted" style="padding:20px;text-align:center">${matchPlayers.length ? "No players match" : "Load today's match players first (in Current Match tab)"}</div>`;
+        
+        let warning = "";
+        if (currentMatch.fantasyEnabled === false) {
+          warning = `<div style="margin: 0 16px 16px; padding: 12px; background: rgba(255, 68, 68, 0.1); border: 1px solid rgba(255, 68, 68, 0.3); border-radius: var(--radius); color: var(--red); font-family: 'Barlow Condensed', sans-serif; font-size: 14px; text-align: center; font-weight: 600; letter-spacing: 0.5px;">
+            ⚠️ CRICAPI: FANTASY STATS UNAVAILABLE FOR THIS MATCH (ID: ${currentMatch.liveMatchId})<br/>
+            <span style="font-size:12px; font-weight:400; opacity:0.8;">Scorecard data is not provided by the API for this match. Manual entry or "Paste Scorecard" is required.</span>
+          </div>`;
+        }
 
-        return pool
+        if (!pool.length)
+          return warning + `<div class="muted" style="padding:20px;text-align:center">${matchPlayers.length ? "No players match" : "Load today's match players first (in Current Match tab)"}</div>`;
+
+        return warning + pool
           .map((p, i) => {
             const s = playerStats[p.name] || {},
               pts = calcPoints(s);
@@ -4206,7 +4403,7 @@
             ?.addEventListener("click", abandonMatch);
           document
             .getElementById("newMatchBtn")
-            ?.addEventListener("click", () => {
+            ?.addEventListener("click", async () => {
               if (
                 !confirm(
                   "Start a new match? The current match stays in history.",
@@ -4218,7 +4415,7 @@
               const newPrimary = remaining[0] || "";
               adminSelectedMatchId = newPrimary || null;
               localTeam = { players: [], captain: "", vc: "" };
-              updateDoc(doc(db, "meta", "game"), {
+              await updateDoc(doc(db, "meta", "game"), {
                 currentMatchId: newPrimary,
                 activeMatchIds: remaining,
               });
@@ -5677,6 +5874,7 @@
               t2 = b.dataset.t2 || "";
             const t1img = b.dataset.t1img || "";
             const t2img = b.dataset.t2img || "";
+            const fantasyEnabled = b.dataset.fantasy === '1';
 
             // Guard 1: exact CricAPI ID already loaded
             const exactMid = Object.keys(activeMatches).find(
@@ -5751,6 +5949,7 @@
               stats: {},
               teams: {},
               liveMatchId: mid,
+              fantasyEnabled,
               createdAt: serverTimestamp(),
             });
             // Add to activeMatchIds, set as current
@@ -5814,7 +6013,7 @@
       <div class="mopt-st">${status}${timeStr}</div>
       ${!hasSquad && !m.matchStarted ? '<div class="mopt-warn">⚠ Squad not announced yet — you can still select and add players manually</div>' : ""}
     </div>
-    <button class="btn-sm" data-id="${m.id}" data-name="${m.name || "Match"}" data-t1="${(m.teamInfo?.[0]?.name || m.teams?.[0] || "").replace(/"/g, "")}" data-t2="${(m.teamInfo?.[1]?.name || m.teams?.[1] || "").replace(/"/g, "")}" data-t1img="${m.teamInfo?.[0]?.img || ""}" data-t2img="${m.teamInfo?.[1]?.img || ""}">Select</button>
+    <button class="btn-sm" data-id="${m.id}" data-name="${m.name || "Match"}" data-t1="${(m.teamInfo?.[0]?.name || m.teams?.[0] || "").replace(/"/g, "")}" data-t2="${(m.teamInfo?.[1]?.name || m.teams?.[1] || "").replace(/"/g, "")}" data-t1img="${m.teamInfo?.[0]?.img || ""}" data-t2img="${m.teamInfo?.[1]?.img || ""}" data-fantasy="${m.fantasyEnabled === true ? '1' : '0'}">Select</button>
   </div>`;
       }
 
@@ -5888,6 +6087,24 @@
         }
 
         try {
+          // If fantasyEnabled is false, scorecard will never come — skip straight to match_info for live score
+          if (activeMatchData.fantasyEnabled === false) {
+            if (showFeedback) toast("CricAPI: Fantasy stats unavailable for this match. Manual entry required.", "err");
+            const infoRes = await _cricFetch(`https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`);
+            const infoData = await infoRes.json();
+            if (infoData.status === "success") {
+              const fallback = {};
+              if (infoData.data?.score?.length) fallback.score = infoData.data.score;
+              if (infoData.data?.status) fallback.matchStatus = infoData.data.status;
+              if (infoData.data?.matchEnded) {
+                fallback.matchEnded = true;
+                fallback.matchResult = infoData.data.status || '';
+              }
+              if (Object.keys(fallback).length) await updateDoc(doc(db, "matches", activeMid), fallback);
+            }
+            return;
+          }
+
           // Single API call — scorecard contains matchStarted, matchEnded, score and player data
           const scRes = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`);
           const scData = await scRes.json();
@@ -5895,7 +6112,21 @@
           if (scData.status !== "success") {
             const reason = scData.reason || "Scorecard unavailable";
             if (reason.toLowerCase().includes("not found")) {
-              if (showFeedback) toast("Scorecard not ready yet");
+              // Scorecard not ready yet — fall back to match_info for live score + status
+              try {
+                const infoRes = await _cricFetch(`https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`);
+                const infoData = await infoRes.json();
+                if (infoData.status === "success" && infoData.data?.matchStarted) {
+                  const fallbackUpdate = {};
+                  const infoScore = infoData.data?.score || [];
+                  const infoStatus = infoData.data?.status || "";
+                  if (infoScore.length) fallbackUpdate.score = infoScore;
+                  if (infoStatus) fallbackUpdate.matchStatus = infoStatus;
+                  if (Object.keys(fallbackUpdate).length) {
+                    await updateDoc(doc(db, "matches", activeMid), fallbackUpdate);
+                  }
+                }
+              } catch(e) { /* silent — scorecard will arrive soon */ }
               return;
             }
             throw new Error(reason);
@@ -5917,12 +6148,16 @@
           // Polling will stop only when admin clicks Finalize (finalized check above).
           if (ended) {
             console.log("Match has ended. Continuing to fetch until admin finalizes.");
-            await updateDoc(doc(db, "matches", activeMid), {
+            const _matchEndUpdate = {
               matchStatus: "Match Concluded",
               matchResult: scData.data?.status || '',
-              score: scData.data?.score || [],
               matchEnded: true,
-            });
+              currentBatsmen: [],   // clear live crease display
+              currentBowler: null,  // clear live crease display
+            };
+            // Only overwrite score if CricAPI returned actual data — never reset stored scores to []
+            if (scData.data?.score?.length) _matchEndUpdate.score = scData.data.score;
+            await updateDoc(doc(db, "matches", activeMid), _matchEndUpdate);
             if (showFeedback) toast("Match concluded — still syncing stats until you finalize.");
             // Fall through to process scorecard stats (no stopAR — keep polling)
           }
@@ -5930,7 +6165,8 @@
           // Not started yet — but also check if scorecard data is already present
           // (CricAPI sometimes delays flipping matchStarted even after play begins)
           const hasScorecard = (scData.data?.scorecard || []).length > 0;
-          if (!started && !hasScorecard) {
+          // Fix: don't bail out early if match has ended — we still need to process final scorecard
+          if (!started && !hasScorecard && !ended) {
             if (showFeedback) toast("Match hasn't started yet");
             return;
           }
@@ -5999,10 +6235,13 @@
               if (infoStatus) statsUpdate["matchStatus"] = infoStatus;
               if (infoData.data?.matchEnded) {
                 ended = true;
-                // Re-trigger kill-switch since the main check already passed
-                stopAR();
-                await updateDoc(doc(db, "matches", activeMid), { matchEnded: true, matchStatus: infoData.data?.status || "Match Concluded" });
-                return;
+                // Mark ended but keep polling until admin finalizes (consistent with scorecard path)
+                await updateDoc(doc(db, "matches", activeMid), {
+                  matchEnded: true,
+                  matchResult: infoData.data?.status || '',
+                  matchStatus: infoData.data?.status || "Match Concluded",
+                });
+                // Fall through — don't stopAR or return
               }
             }
           }
@@ -6144,7 +6383,8 @@
           if (overSummaries.length) statsUpdate["overSummaries"] = overSummaries;
 
           // Extract current active players from scorecard (Live Batsmen & Bowler)
-          if (sc.length > 0) {
+          // Skip for ended matches — currentBatsmen/currentBowler were already cleared in the match-end update
+          if (sc.length > 0 && !ended) {
             const curInn = sc[sc.length - 1];
             if (curInn.batting) {
               const notOutBatsmen = curInn.batting.filter(
@@ -6235,7 +6475,7 @@
               statsUpdate[`stats.${p}`] = s;
             });
             await updateDoc(
-              doc(db, "matches", getActiveMid() || currentMatchId),
+              doc(db, "matches", activeMid),  // use captured ID — not getActiveMid() which changes if admin switches match
               statsUpdate,
             );
             console.log(`[Poller] Success! Synced ${Object.keys(activeMatchData?.playerStatus || {}).length} players for ${activeMid}`);
@@ -6260,7 +6500,7 @@
               const fallback = {};
               if (scoreArr.length) fallback["score"] = scoreArr;
               if (matchStatus) fallback["matchStatus"] = matchStatus;
-              await updateDoc(doc(db, "matches", getActiveMid() || currentMatchId), fallback);
+              await updateDoc(doc(db, "matches", activeMid), fallback);  // use captured ID
             }
             if (showFeedback) toast("No player stats matched yet — check browser console for name mismatches", "err");
           }
@@ -6273,9 +6513,10 @@
       // ── Auto-refresh ──
       function startAR(secs) {
         const match = getMatch(getActiveMid());
-        // Only start if match is locked (in progress) and not yet ended/finalized
-        if (!match?.locked || match?.matchEnded || match?.finalized) {
-          console.log("Match not live, already ended, or finalized. Auto-refresh not started.");
+        // Only start if match is locked and not yet finalized.
+        // matchEnded is NOT a blocker — we keep polling until admin finalizes to capture late stats (3rd umpire etc.)
+        if (!match?.locked || match?.finalized) {
+          console.log("Match not locked or already finalized. Auto-refresh not started.");
           return;
         }
         stopAR();
@@ -6323,8 +6564,8 @@
     <div class="hero-season">IPL 2026</div>
   </div>
 
-  <!-- Sticky Score Pill — always visible quick score -->
-  ${renderScorePill()}
+  <!-- Sticky Score Pill — stable wrapper always exists so _doRefresh() can update innerHTML -->
+  <div id="scorePillWrap">${renderScorePill()}</div>
 
   <!-- Sticky nav below score pill -->
   <nav class="topnav">
@@ -8893,6 +9134,25 @@
         flex: 1;
         min-width: 0;
       }
+      .lb-name-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 0;
+      }
+      .lb-pitch-btn {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 14px;
+        cursor: pointer;
+        flex-shrink: 0;
+        line-height: 1;
+        transition: background 0.15s;
+      }
+      .lb-pitch-btn:hover { background: rgba(255,255,255,0.16); }
       .lb-name {
         font-family: "Barlow Condensed", sans-serif;
         font-weight: 900;
@@ -11547,9 +11807,8 @@
         }
       }
 
-      /* When no match is active, pill is hidden — topnav returns to top:0 */
-      .score-pill:empty,
-      .score-pill[style*="display:none"] ~ .topnav {
+      /* When no match is active, pill wrapper is empty — topnav returns to top:0 */
+      #scorePillWrap:empty ~ .topnav {
         top: 0;
       }
 
@@ -11634,10 +11893,9 @@
           box-shadow: 0 2px 8px rgba(0,0,0,.3) !important;
         }
 
-        /* 5. Reduce background orb size (still off due to animation:none
-              but guards against any future re-enable) */
+        /* 5. Reduce ambient opacity on low-power mobile (animation already killed above) */
         body::after {
-          width: 0; height: 0;
+          opacity: 0.06 !important;
         }
       }
 
@@ -11764,6 +12022,480 @@
         flex-shrink: 0;
         border: 1px solid var(--bd2);
       }
+      /* ═══════════════════════════════════════════════════════
+         LIQUID GLASS VISUAL UPGRADE — 2026 Edition
+         CSS-only. No HTML/JS structure changes.
+         Safe cascade overrides of specific properties only.
+      ═══════════════════════════════════════════════════════ */
+
+      /* ── 1. Stadium Ambient — dual team-color orbs ──────── */
+      body::after {
+        /* Upgrade: full-viewport overlay with two radial blobs, one per team color */
+        width: auto;
+        height: auto;
+        border-radius: 0;
+        inset: 0;
+        top: 0; right: 0; /* reset positional props from original */
+        background:
+          radial-gradient(ellipse 55% 50% at 5% 10%,  var(--team-primary,  #2563ff), transparent 68%),
+          radial-gradient(ellipse 50% 45% at 95% 88%, var(--team-secondary, #f59e0b), transparent 68%);
+        opacity: 0.12;
+        filter: none;
+        animation: ambient-breathe 14s ease-in-out infinite alternate;
+      }
+      @keyframes ambient-breathe {
+        0%   { opacity: 0.09; transform: scale(1); }
+        50%  { opacity: 0.14; }
+        100% { opacity: 0.10; transform: scale(1.04); }
+      }
+
+      /* ── 2. Refractive card borders — top-down stadium lighting ── */
+      /* Backgrounds intentionally untouched — existing glass transparency is the effect.
+         Only border-color and box-shadow are upgraded. */
+      .acard {
+        border-color: rgba(255,255,255,0.16) rgba(255,255,255,0.07) rgba(255,255,255,0.03) rgba(255,255,255,0.09);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.10),
+          0 12px 40px rgba(0,0,0,0.55),
+          0 2px 8px rgba(0,0,0,0.3);
+      }
+      .acard:hover {
+        border-color: rgba(255,255,255,0.22) rgba(255,255,255,0.10) rgba(255,255,255,0.05) rgba(255,255,255,0.12);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.16),
+          0 16px 48px rgba(0,0,0,0.6);
+        transform: translateY(-2px);
+      }
+
+      .lb-card {
+        border-color: rgba(255,255,255,0.14) rgba(255,255,255,0.06) rgba(255,255,255,0.02) rgba(255,255,255,0.08);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.08),
+          0 8px 28px rgba(0,0,0,0.5);
+      }
+
+      .pcard {
+        border-color: rgba(255,255,255,0.12) rgba(255,255,255,0.05) rgba(255,255,255,0.02) rgba(255,255,255,0.07);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.07),
+          0 6px 24px rgba(0,0,0,0.45);
+      }
+      .pcard:hover:not(.pcard-dis) {
+        border-color: rgba(255,255,255,0.20) rgba(255,255,255,0.09) rgba(255,255,255,0.04) rgba(255,255,255,0.11);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          0 10px 32px rgba(0,0,0,0.55),
+          0 0 20px rgba(37,99,255,0.12);
+      }
+
+      .match-bar {
+        border-color: rgba(255,255,255,0.14) rgba(255,255,255,0.06) rgba(255,255,255,0.02) rgba(255,255,255,0.08);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.08),
+          0 8px 32px rgba(0,0,0,0.45);
+      }
+
+      /* ── 3. Score bar — keep existing background, refine border only ── */
+      .cricket-score-bar {
+        border-color: rgba(255,255,255,0.20) rgba(255,255,255,0.10) rgba(255,255,255,0.06) rgba(255,255,255,0.10) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          0 16px 48px rgba(0,0,0,0.6);
+      }
+
+      /* ── 4. Score numbers — larger, sharper, broadcast feel ── */
+      .csb-big-score {
+        font-size: clamp(34px, 7vw, 46px);
+        letter-spacing: 1px;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      }
+
+      .csb-overs {
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        opacity: 0.7;
+      }
+
+      .csb-context-bar {
+        font-size: 11px;
+        letter-spacing: 1.5px;
+        font-weight: 700;
+        opacity: 0.85;
+      }
+
+      /* ── 5. Score pill — richer team-color bleed ────────── */
+      .score-pill {
+        background: rgba(4, 8, 16, 0.88);
+        border-bottom-color: rgba(255,255,255,0.10);
+        box-shadow:
+          0 8px 32px rgba(0,0,0,0.5),
+          inset 0 -1px 0 rgba(255,255,255,0.04);
+      }
+      .score-pill::before {
+        opacity: 0.9; /* was implicit 1, now tuned */
+        background: linear-gradient(90deg,
+          var(--team-glow-a) 0%,
+          transparent 55%,
+          var(--team-glow-b) 100%);
+      }
+
+      /* ── 6. Navigation — slightly deeper glass ──────────── */
+      .topnav {
+        background: rgba(4, 8, 16, 0.94);
+        border-bottom-color: rgba(255,255,255,0.08);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.4);
+      }
+
+      /* ── 7. View tabs — cleaner pill style ──────────────── */
+      .view-tabs {
+        gap: 4px;
+      }
+      .vtab {
+        border-radius: 6px;
+        transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .vtab.active {
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 8px rgba(0,0,0,0.3);
+      }
+
+      /* ── 8. Leaderboard medal — more distinct ───────────── */
+      .lb-med {
+        text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+        font-weight: 900;
+      }
+
+      /* ── 9. Points values — always mono to prevent jump ── */
+      .lb-pts, .lb-total, .pts, .astat-val, .stat-val, .csb-ns-score {
+        font-family: "DM Mono", monospace;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0;
+      }
+
+      /* ═══════════════════════════════════════════════════════
+         PITCH VIEW
+      ═══════════════════════════════════════════════════════ */
+
+      /* Toggle row */
+      .pv-toggle-row {
+        display: flex;
+        gap: 8px;
+        margin: 10px 0 14px;
+      }
+      .pv-toggle-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        background: var(--glass);
+        border: 1px solid var(--bd);
+        color: var(--text2);
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .pv-toggle-btn.pv-toggle-active {
+        background: var(--accent3);
+        border-color: var(--accent);
+        color: var(--white);
+        box-shadow: 0 0 12px var(--accent-glow);
+      }
+
+      /* ── Pitch View v2 — Dream11-style ───────────────────── */
+
+      /* Outer oval frame — more stadium-like shape */
+      .pv2-outer {
+        width: 100%;
+        max-width: 480px;
+        margin: 0 auto 8px;
+        border-radius: 50% / 30%;
+        overflow: hidden;
+        box-shadow: 0 0 45px rgba(0,0,0,0.65), inset 0 0 20px rgba(0,0,0,0.3);
+        border: 2px solid rgba(255,255,255,0.12);
+        position: relative;
+      }
+
+      /* Ground — lush lush mow-stripe green */
+      .pv2-ground {
+        position: relative;
+        width: 100%;
+        background:
+          /* Subtle Noise */
+          url('https://www.transparenttextures.com/patterns/p6.png'),
+          /* Mow Stripes */
+          repeating-linear-gradient(
+            180deg,
+            rgba(0,0,0,0.05) 0px, rgba(0,0,0,0.05) 30px,
+            transparent 30px, transparent 60px
+          ),
+          linear-gradient(180deg, #1b5e20 0%, #144316 100%);
+        padding: 22px 10px 28px;
+        overflow: hidden;
+      }
+
+      /* Realistic vertical pitch in the center background */
+      .pv2-pitch-strip {
+        position: absolute;
+        left: 50%;
+        top: 5%;
+        bottom: 5%;
+        transform: translateX(-50%);
+        width: 16%;
+        background: 
+          /* Dirt/Clay Texture */
+          url('https://www.transparenttextures.com/patterns/natural-paper.png'),
+          linear-gradient(180deg, #d4bc8d 0%, #c2a676 50%, #b39564 100%);
+        background-blend-mode: multiply;
+        border-left:  1px solid rgba(255,255,255,0.1);
+        border-right: 1px solid rgba(255,255,255,0.1);
+        pointer-events: none;
+        box-shadow: 0 0 25px rgba(0,0,0,0.5);
+        border-radius: 2px;
+      }
+      
+      /* Popping Creases (The long horizontal lines) */
+      .pv2-pitch-strip::before, .pv2-pitch-strip::after {
+        content: "";
+        position: absolute;
+        left: -15%; right: -15%; /* Slightly wider than the pitch */
+        height: 1.5px;
+        background: rgba(255,255,255,0.7);
+        box-shadow: 0 0 3px rgba(255,255,255,0.3);
+        z-index: 1;
+      }
+      .pv2-pitch-strip::before { top: 18%; }
+      .pv2-pitch-strip::after { bottom: 18%; }
+
+      /* Bowling Creases & Stumps (Inner blocks) */
+      .pv2-pitch-inner {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        pointer-events: none;
+      }
+      /* Small horizontal line for stumps */
+      .pv2-stumps {
+        position: absolute;
+        left: 25%; right: 25%;
+        height: 2px;
+        background: repeating-linear-gradient(90deg, #fff 0, #fff 2px, transparent 2px, transparent 4px);
+        z-index: 2;
+      }
+      .pv2-stumps-top { top: 12%; }
+      .pv2-stumps-bot { bottom: 12%; }
+
+      /* Return creases (small vertical lines at both ends) */
+      .pv2-return-crease {
+        position: absolute;
+        width: 1px;
+        height: 10%;
+        background: rgba(255,255,255,0.4);
+      }
+      .pv2-rc-tl { top: 8%; left: 0; }
+      .pv2-rc-tr { top: 8%; right: 0; }
+      .pv2-rc-bl { bottom: 8%; left: 0; }
+      .pv2-rc-br { bottom: 8%; right: 0; }
+
+      /* Player content sits above the strip */
+      .pv2-content {
+        position: relative;
+        z-index: 2;
+      }
+
+      .pv2-total-bar {
+        text-align: center;
+        font-size: 13px;
+        color: #fff;
+        font-weight: 700;
+        font-family: "Barlow Condensed", sans-serif;
+        padding: 4px 12px;
+        background: rgba(0,0,0,0.4);
+        width: fit-content;
+        margin: 0 auto 14px;
+        border-radius: 20px;
+        backdrop-filter: blur(4px);
+        border: 1px solid rgba(255,255,255,0.1);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+      .pv2-total-bar b { color: #ffca28; text-shadow: 0 0 8px rgba(255,202,40,0.4); }
+
+      .pv2-section { margin-bottom: 12px; }
+
+      .pv2-role-label {
+        text-align: center;
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        color: rgba(255,255,255,0.9);
+        margin: 0 auto 12px;
+        text-transform: uppercase;
+        background: rgba(0,0,0,0.3);
+        padding: 3px 14px;
+        border-radius: 12px;
+        width: fit-content;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        backdrop-filter: blur(2px);
+        text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+      }
+
+      .pv2-row {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .pv2-player {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        width: 62px;
+      }
+
+      .pv2-avatar-wrap { position: relative; }
+
+      .pv2-avatar {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: rgba(0,0,0,0.45);
+        border: 2px solid rgba(255,255,255,0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 15px;
+        font-weight: 800;
+        color: #fff;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+
+      .pv2-badge {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 9px;
+        font-weight: 900;
+        border: 1.5px solid rgba(0,0,0,0.5);
+      }
+      .pv2-cap { background: #f59e0b; color: #000; box-shadow: 0 0 6px rgba(245,158,11,0.7); }
+      .pv2-vc  { background: #d1d5db; color: #000; }
+
+      .pv2-name {
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 11px;
+        font-weight: 700;
+        color: #fff;
+        text-align: center;
+        line-height: 1.25;
+        word-break: break-word;
+        width: 100%;
+        text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      }
+
+      .pv2-pts {
+        font-family: "DM Mono", monospace;
+        font-size: 10px;
+        font-weight: 700;
+        color: #ffca28;
+        text-align: center;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        background: rgba(0,0,0,0.55);
+        padding: 1px 6px;
+        border-radius: 4px;
+        margin-top: 3px;
+        border: 1px solid rgba(255,255,255,0.05);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      }
+      .pv2-mult {
+        font-size: 8px;
+        font-weight: 800;
+        color: #f59e0b;
+        background: rgba(245,158,11,0.2);
+        border: 1px solid rgba(245,158,11,0.4);
+        border-radius: 3px;
+        padding: 0 3px;
+        line-height: 1.4;
+      }
+
+      /* Floating +X pts on points increase */
+      .pv2-pts-rising::after {
+        content: attr(data-delta) " pts";
+        position: absolute;
+        top: -2px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #4ade80;
+        font-size: 10px;
+        font-weight: 700;
+        white-space: nowrap;
+        pointer-events: none;
+        animation: pv2-pts-float 1.6s ease-out forwards;
+      }
+      @keyframes pv2-pts-float {
+        0%   { opacity: 1; transform: translateX(-50%) translateY(0px); }
+        100% { opacity: 0; transform: translateX(-50%) translateY(-22px); }
+      }
+
+      /* Striker — pulsing magenta ring */
+      .pv2-av-striker {
+        border-color: #ff00cc !important;
+        box-shadow: 0 0 0 3px rgba(255,0,204,0.45), 0 0 14px rgba(255,0,204,0.4);
+        animation: pv2-striker-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pv2-striker-pulse {
+        0%, 100% { box-shadow: 0 0 0 3px rgba(255,0,204,0.45), 0 0 14px rgba(255,0,204,0.35); }
+        50%       { box-shadow: 0 0 0 5px rgba(255,0,204,0.8),  0 0 22px rgba(255,0,204,0.6); }
+      }
+
+      /* Bowler — white ring */
+      .pv2-av-bowler {
+        border-color: rgba(255,255,255,0.85) !important;
+        box-shadow: 0 0 0 3px rgba(255,255,255,0.25), 0 0 12px rgba(255,255,255,0.2);
+        animation: pv2-bowler-pulse 2s ease-in-out infinite;
+      }
+      @keyframes pv2-bowler-pulse {
+        0%, 100% { box-shadow: 0 0 0 3px rgba(255,255,255,0.25), 0 0 12px rgba(255,255,255,0.15); }
+        50%       { box-shadow: 0 0 0 5px rgba(255,255,255,0.5),  0 0 18px rgba(255,255,255,0.3); }
+      }
+
+      @media (max-width: 400px) {
+        .pv2-player { width: 54px; gap: 3px; }
+        .pv2-avatar { width: 44px; height: 44px; font-size: 13px; }
+        .pv2-name   { font-size: 10px; }
+        .pv2-row    { gap: 6px; }
+      }
+
+      /* ── 10. Mobile — disable new orb animation ─────────── */
+      @media (max-width: 768px) {
+        body::after {
+          animation: none !important;
+          opacity: 0.07 !important;
+          transform: none !important;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        body::after {
+          animation: none !important;
+          opacity: 0.06 !important;
+        }
+      }
+
     </style>
   </head>
   <body>
