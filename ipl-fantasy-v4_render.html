@@ -1933,7 +1933,9 @@
           const allChips = [...batChips, ...bowlChips, ...fieldChips];
 
           const ptsHtml = pts > 0
-            ? `<span class="sc-pts-num" data-count-up="${pts}">0</span><span class="sc-pts-unit">pts</span>`
+            ? animate
+              ? `<span class="sc-pts-num" data-count-up="${pts}">0</span><span class="sc-pts-unit">pts</span>`
+              : `<span class="sc-pts-num">${pts}</span><span class="sc-pts-unit">pts</span>`
             : `<span style="color:var(--muted2);font-size:18px">–</span>`;
 
           return `
@@ -2136,11 +2138,7 @@
           if (r === 0)  return 'hsc-r-duck';
           return '';
         };
-        const milestoneBadge = (r) => {
-          if (r >= 100) return '<span class="hsc-badge hsc-badge-ton">💯</span>';
-          if (r >= 50)  return '<span class="hsc-badge hsc-badge-fifty">★</span>';
-          return '';
-        };
+        const milestoneBadge = () => '';
         const haulBadge = (w) => {
           if (w >= 5)  return '<span class="hsc-badge hsc-badge-fifer">5W</span>';
           if (w >= 3)  return '<span class="hsc-badge hsc-badge-haul">3W</span>';
@@ -3253,7 +3251,11 @@
         return `<div class="screen-main">${nav(true)}<div id="admin-body">${tabs}${matchTabs}${body}</div></div>`;
       }
 
+      var _switchAdminTabBusy = false;
       window.switchAdminTab = function (t) {
+        if (_switchAdminTabBusy) return;
+        _switchAdminTabBusy = true;
+        setTimeout(function () { _switchAdminTabBusy = false; }, 400);
         history.replaceState({}, "", `${location.pathname}?atab=${t}`);
         const adminBody = document.getElementById("admin-body");
         if (adminBody) {
@@ -3372,47 +3374,51 @@
         </div>
       </div>
 
-      <div class="acard">
-        <div class="acard-t">🎮 Match Control</div>
-        <div class="flow-steps">
-          <div class="fs ${!xiReady && !locked && !finalized ? "fs-active" : xiReady || locked ? "fs-done" : "fs-dim"}">1 · Open</div>
-          <div class="fs-arrow">→</div>
-          <div class="fs ${xiReady && !locked && !finalized ? "fs-active" : locked ? "fs-done" : "fs-dim"}">2 · Toss</div>
-          <div class="fs-arrow">→</div>
-          <div class="fs ${locked && !finalized ? "fs-active" : finalized ? "fs-done" : "fs-dim"}">3 · Live</div>
-          <div class="fs-arrow">→</div>
-          <div class="fs ${finalized ? "fs-active" : "fs-dim"}">4 · Done</div>
+      <div class="acard mc-card">
+        <div class="mc-hd">
+          <span class="mc-title">Match Control</span>
+          <span class="mc-badge ${finalized ? "mc-badge-done" : locked ? "mc-badge-live" : revealed ? "mc-badge-toss" : "mc-badge-open"}">${finalized ? "✓ FINAL" : locked ? "● LIVE" : revealed ? "TOSS" : "OPEN"}</span>
         </div>
-        <div class="ctrl-btns" style="margin-top:12px">
-          ${
-            !locked && !finalized && hasMatch
-              ? `
+
+        <div class="mc-track">
+          <div class="mc-node ${!xiReady && !locked && !finalized ? "mc-node-active" : (xiReady || locked || finalized) ? "mc-node-done" : "mc-node-dim"}">
+            <div class="mc-dot"></div><span class="mc-lbl">Open</span>
+          </div>
+          <div class="mc-line ${(xiReady || locked || finalized) ? "mc-line-done" : ""}"></div>
+          <div class="mc-node ${xiReady && !locked && !finalized ? "mc-node-active" : (locked || finalized) ? "mc-node-done" : "mc-node-dim"}">
+            <div class="mc-dot"></div><span class="mc-lbl">Toss</span>
+          </div>
+          <div class="mc-line ${(locked || finalized) ? "mc-line-done" : ""}"></div>
+          <div class="mc-node ${locked && !finalized ? "mc-node-active" : finalized ? "mc-node-done" : "mc-node-dim"}">
+            <div class="mc-dot"></div><span class="mc-lbl">Live</span>
+          </div>
+          <div class="mc-line ${finalized ? "mc-line-done" : ""}"></div>
+          <div class="mc-node ${finalized ? "mc-node-done" : "mc-node-dim"}">
+            <div class="mc-dot"></div><span class="mc-lbl">Done</span>
+          </div>
+        </div>
+
+        <div class="mc-actions">
+          ${!hasMatch ? `<p class="muted" style="font-size:12px;padding:4px 0">Set up a match first.</p>` : ""}
+          ${!locked && !finalized && hasMatch ? `
+          <div class="mc-action-group">
             <button class="btn-reveal" id="fetchXIBtn">${xiReady ? "🔄 Re-fetch Playing XI" : "🏏 TOSS DONE — FETCH XI"}</button>
-            <p class="ctrl-hint">Hit at toss. Shows 🟢/🔴 status to members.</p>`
-              : ""
-          }
-          ${
-            !locked && !finalized && hasMatch
-              ? `
-            <button class="btn-warn${xiReady ? "" : " btn-warn-muted"}" id="startMatchBtn">🚀 START MATCH</button>
-            <p class="ctrl-hint">${xiReady ? "Teams lock + leaderboard goes live." : "⚠️ Fetch Playing XI first."}</p>`
-              : ""
-          }
-          ${
-            locked || finalized
-              ? `
-            <button class="btn-warn" id="finalizeBtn">${finalized ? "♻️ Update Finalized" : "✅ Finalize & Save"}</button>
-            <button class="btn-nuke" id="abandonBtn" style="color:var(--gold);border-color:rgba(201,168,76,.3)">🌧️ Abandon / No Result</button>
-            <p class="ctrl-hint">${finalized ? "Update history + season totals." : "Auto-saves earned points."}</p>`
-              : ""
-          }
-          ${finalized ? `<button class="btn-gold" style="font-size:15px;padding:10px" id="newMatchBtn">+ Start Next Match</button>` : ""}
+            <button class="mc-start-btn${xiReady ? "" : " mc-start-btn-muted"}" id="startMatchBtn">🚀 START MATCH</button>
+            <p class="mc-hint">${xiReady ? "Locks teams · leaderboard goes live" : "Fetch Playing XI before starting"}</p>
+          </div>` : ""}
+          ${locked || finalized ? `
+          <div class="mc-action-group">
+            <button class="mc-finalize-btn" id="finalizeBtn">${finalized ? "♻️ Update Finalized" : "✅ Finalize & Save"}</button>
+            ${finalized ? `<button class="btn-gold" style="font-size:14px;padding:10px;width:100%" id="newMatchBtn">+ Start Next Match</button>` : ""}
+            <button class="mc-abandon-btn" id="abandonBtn">🌧️ Abandon / No Result</button>
+            <p class="mc-hint">${finalized ? "Updates history + season totals" : "Auto-saves all earned points"}</p>
+          </div>` : ""}
         </div>
-        ${finalized ? '<p class="muted" style="margin-top:8px;font-size:12px">Points saved. Start next match when ready.</p>' : ""}
-        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bd)">
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;color:var(--muted2);margin-bottom:6px;text-transform:uppercase">🧪 DANGER ZONE</div>
-          <button class="btn-nuke" id="nukeBtn">🗑️ Reset Everything (Test Wipe)</button>
-        </div>
+
+        <details class="mc-danger-wrap">
+          <summary class="mc-danger-summary">⚠ Danger Zone</summary>
+          <button class="btn-nuke" id="nukeBtn" style="margin-top:8px">🗑️ Reset Everything (Test Wipe)</button>
+        </details>
       </div>
 
     </div>
@@ -6666,17 +6672,11 @@
             <button class="theme-option" data-theme="monokai-pro">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#2D2A2E,#ffd866)"></span>Monokai
             </button>
-            <button class="theme-option" data-theme="cyber-marine">
-              <span class="theme-swatch" style="background:linear-gradient(135deg,#1A202C,#00F5FF)"></span>Marine
-            </button>
             <button class="theme-option" data-theme="sakura-night">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#16161D,#FF2E63)"></span>Sakura
             </button>
             <button class="theme-option" data-theme="retro-terminal">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#1B1D1E,#FFB000)"></span>Terminal
-            </button>
-            <button class="theme-option" data-theme="stellar-glass">
-              <span class="theme-swatch" style="background:linear-gradient(135deg,#0F172A,rgba(255,255,255,.6));border-color:rgba(255,255,255,.3)"></span>Stellar
             </button>
             <button class="theme-option" data-theme="emerald-pitch">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#060d09,#34d399)"></span>Emerald
@@ -6689,6 +6689,15 @@
             </button>
             <button class="theme-option" data-theme="royal-bengal">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#07050f,#8165ff,#fb923c)"></span>Royal
+            </button>
+            <button class="theme-option" data-theme="volcanic-obsidian">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#060404,#FF3D1F,#FFB347)"></span>Volcanic
+            </button>
+            <button class="theme-option" data-theme="deep-cosmos">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#03020A,#7C6FFF,#FFE066)"></span>Cosmos
+            </button>
+            <button class="theme-option" data-theme="bronze-circuit">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#080706,#CD7F32,#FFD700)"></span>Bronze
             </button>
           </div>
         </div>
@@ -6804,11 +6813,16 @@
       }
 
       function triggerCountUp() {
-        document.querySelectorAll("[data-count-up]").forEach((el) => {
+        const items = [];
+        document.querySelectorAll("[data-count-up]").forEach(el => {
           const end = parseInt(el.dataset.countUp);
-          if (isNaN(end)) return;
-          animateValue(el, 0, end, 800);
-          delete el.dataset.countUp; // Run only once
+          if (!isNaN(end)) items.push({ el, end });
+          delete el.dataset.countUp; // Remove immediately so re-calls are no-ops
+        });
+        // Stagger animations to avoid 20+ simultaneous rAF loops freezing Android
+        const stagger = items.length > 8 ? 30 : 50;
+        items.forEach(({ el, end }, i) => {
+          setTimeout(() => animateValue(el, 0, end, 600), i * stagger);
         });
       }
       // Strip trailing series identifier (e.g. ", Indian Premier League 2026" or ", South Africa tour of...")
@@ -7023,18 +7037,6 @@
         --team-glow-color: #5D3139;
       }
 
-      /* cyber-marine — Nord / Deep Sea */
-      [data-theme='cyber-marine'] {
-        --bg: #131820; --s1: #1A202C; --s2: #2D3748; --s3: #384766;
-        --bd: rgba(0,245,255,.10); --bd2: rgba(0,245,255,.18); --bd3: rgba(0,245,255,.28);
-        --accent: #00F5FF; --accent2: #00c4cc; --accent3: rgba(0,245,255,.1); --accent-glow: rgba(0,245,255,.3);
-        --gold: #4FD1C5; --gold2: #38b2ac; --gold3: rgba(79,209,197,.1); --gold-glow: rgba(79,209,197,.25);
-        --text: #E2E8F0; --text2: #A0AEC0; --muted: #2D3748; --muted2: #718096;
-        --glass: rgba(0,245,255,.06); --glass-border: rgba(0,245,255,.32); --glass-hover: rgba(0,245,255,.14);
-        --card-bg: linear-gradient(145deg, rgba(10,18,30,.94) 0%, rgba(6,12,22,.90) 100%);
-        --nav-bg: rgba(19, 24, 32, 0.93);
-        --team-glow-color: #00F5FF;
-      }
 
       /* sakura-night — Tokyo Night / Anime */
       [data-theme='sakura-night'] {
@@ -7062,19 +7064,6 @@
         --team-glow-color: #FFB000;
       }
 
-      /* stellar-glass — Apple Vision / Frosted */
-      [data-theme='stellar-glass'] {
-        --bg: #060a14; --s1: rgba(255,255,255,.03); --s2: rgba(255,255,255,.06); --s3: rgba(255,255,255,.10);
-        --bd: rgba(255,255,255,.12); --bd2: rgba(255,255,255,.20); --bd3: rgba(255,255,255,.30);
-        --accent: #e8f0ff; --accent2: #c8d8ff; --accent3: rgba(232,240,255,.1); --accent-glow: rgba(232,240,255,.25);
-        --gold: rgba(255,255,255,.92); --gold2: rgba(255,255,255,.75); --gold3: rgba(255,255,255,.08); --gold-glow: rgba(255,255,255,.2);
-        --text: #ffffff; --text2: rgba(255,255,255,.70); --muted: rgba(255,255,255,.10); --muted2: rgba(255,255,255,.45);
-        --glass: rgba(255,255,255,.08); --glass-border: rgba(255,255,255,.25); --glass-hover: rgba(255,255,255,.15);
-        --card-bg: linear-gradient(145deg, rgba(255,255,255,.15) 0%, rgba(255,255,255,.07) 100%);
-        --silk-border: 1px solid rgba(255,255,255,.15);
-        --nav-bg: rgba(6, 10, 20, 0.65);
-        --team-glow-color: rgba(255,255,255,.8);
-      }
 
       /* emerald-pitch — Forest Cricket Green */
       [data-theme='emerald-pitch'] {
@@ -7127,6 +7116,49 @@
         --nav-bg: rgba(7, 5, 15, 0.95);
         --team-glow-color: #8165ff;
       }
+
+      /* volcanic-obsidian — Lava crack on obsidian black */
+      [data-theme='volcanic-obsidian'] {
+        --bg: #060404; --s1: #0f0707; --s2: #180c0c; --s3: #221010;
+        --bd: rgba(255,61,31,.13); --bd2: rgba(255,61,31,.21); --bd3: rgba(255,61,31,.32);
+        --accent: #FF3D1F; --accent2: #e02d12; --accent3: rgba(255,61,31,.1); --accent-glow: rgba(255,61,31,.5);
+        --gold: #FFB347; --gold2: #f59e0b; --gold3: rgba(255,179,71,.1); --gold-glow: rgba(255,179,71,.38);
+        --text: #fff5f3; --text2: #ffb09a; --muted: #3a0e0e; --muted2: #9a5a4a;
+        --glass: rgba(255,61,31,.06); --glass-border: rgba(255,61,31,.35); --glass-hover: rgba(255,61,31,.15);
+        --card-bg: linear-gradient(145deg, rgba(26,8,6,.97) 0%, rgba(16,4,2,.95) 100%);
+        --nav-bg: rgba(6, 4, 4, 0.97);
+        --green: #4ade80; --red: #FF3D1F;
+        --team-glow-color: #FF3D1F;
+      }
+
+      /* deep-cosmos — Black space with electric violet + star gold */
+      [data-theme='deep-cosmos'] {
+        --bg: #03020A; --s1: #07051A; --s2: #0E0B2A; --s3: #15113A;
+        --bd: rgba(124,111,255,.14); --bd2: rgba(124,111,255,.23); --bd3: rgba(124,111,255,.34);
+        --accent: #7C6FFF; --accent2: #6355e0; --accent3: rgba(124,111,255,.1); --accent-glow: rgba(124,111,255,.5);
+        --gold: #FFE066; --gold2: #f5c842; --gold3: rgba(255,224,102,.1); --gold-glow: rgba(255,224,102,.38);
+        --text: #EEE9FF; --text2: #B8ADF0; --muted: #1a1440; --muted2: #6e66b8;
+        --glass: rgba(124,111,255,.07); --glass-border: rgba(124,111,255,.35); --glass-hover: rgba(124,111,255,.16);
+        --card-bg: linear-gradient(145deg, rgba(10,7,28,.97) 0%, rgba(5,3,18,.95) 100%);
+        --nav-bg: rgba(3, 2, 10, 0.97);
+        --green: #4ade80; --red: #ff6b8a;
+        --team-glow-color: #7C6FFF;
+      }
+
+      /* bronze-circuit — Warm dark with rich copper-bronze metallic */
+      [data-theme='bronze-circuit'] {
+        --bg: #080706; --s1: #110F08; --s2: #1C190E; --s3: #272315;
+        --bd: rgba(205,127,50,.14); --bd2: rgba(205,127,50,.23); --bd3: rgba(205,127,50,.34);
+        --accent: #CD7F32; --accent2: #b06b28; --accent3: rgba(205,127,50,.1); --accent-glow: rgba(205,127,50,.48);
+        --gold: #FFD700; --gold2: #d4af37; --gold3: rgba(255,215,0,.1); --gold-glow: rgba(255,215,0,.38);
+        --text: #FFF8EE; --text2: #D4A870; --muted: #2C2210; --muted2: #8B6E3A;
+        --glass: rgba(205,127,50,.07); --glass-border: rgba(205,127,50,.35); --glass-hover: rgba(205,127,50,.16);
+        --card-bg: linear-gradient(145deg, rgba(24,18,6,.97) 0%, rgba(14,10,3,.95) 100%);
+        --nav-bg: rgba(8, 7, 6, 0.97);
+        --green: #86efac; --red: #f87171;
+        --team-glow-color: #CD7F32;
+      }
+
 
       /* ── NEW ANIMATIONS ── */
       @keyframes glowPulse {
@@ -8215,6 +8247,9 @@
         white-space: nowrap;
         margin-bottom: -2px;
         transition: all 0.15s;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
       }
       .vtab.active {
         color: var(--white);
@@ -10173,19 +10208,19 @@
       .mrow {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 7px 0;
+        gap: 6px;
+        padding: 4px 0;
         border-bottom: 1px solid rgba(30, 45, 72, 0.4);
         font-family: "Barlow Condensed", sans-serif;
-        font-size: 14px;
+        font-size: 13px;
       }
       .mrow:last-child {
         border-bottom: none;
       }
       .mrow-r {
-        min-width: 26px;
+        min-width: 22px;
         font-family: "DM Mono", monospace;
-        font-size: 14px;
+        font-size: 13px;
       }
       .mrow-n {
         flex: 1;
@@ -10195,7 +10230,7 @@
         letter-spacing: 0.3px;
       }
       .mrow-s {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
         letter-spacing: 0.5px;
       }
@@ -10207,7 +10242,7 @@
       }
       .mrow-p {
         font-family: "DM Mono", monospace;
-        font-size: 16px;
+        font-size: 13px;
         color: var(--gold);
       }
       .muted {
@@ -10263,6 +10298,11 @@
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
+        max-height: 148px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        padding-right: 2px;
       }
       .manual-add-player {
         background: var(--s1);
@@ -10307,43 +10347,178 @@
         margin-left: 3px;
       }
 
-      /* ── FLOW STEPS ── */
-      .flow-steps {
+      /* ── MATCH CONTROL CARD ── */
+      .mc-card { position: relative; }
+      .mc-hd {
         display: flex;
         align-items: center;
-        gap: 4px;
-        flex-wrap: wrap;
-        margin-bottom: 14px;
-        padding: 9px 12px;
-        background: var(--s1);
-        border-radius: var(--radius);
-        border: 1px solid var(--bd);
+        justify-content: space-between;
+        margin-bottom: 16px;
       }
-      .fs {
+      .mc-title {
         font-family: "Barlow Condensed", sans-serif;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        padding: 3px 8px;
-        border-radius: var(--radius);
-        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 2px;
         text-transform: uppercase;
-      }
-      .fs-active {
-        background: rgba(26, 86, 255, 0.15);
-        color: var(--white);
-        border: 1px solid var(--accent);
-      }
-      .fs-done {
-        color: var(--green);
-      }
-      .fs-dim {
         color: var(--muted2);
       }
-      .fs-arrow {
-        color: var(--muted2);
-        font-size: 11px;
+      .mc-badge {
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        padding: 3px 9px;
+        border-radius: 4px;
       }
+      .mc-badge-open { background: rgba(37,99,255,.12); color: var(--accent); border: 1px solid rgba(37,99,255,.3); }
+      .mc-badge-toss { background: rgba(245,158,11,.12); color: var(--gold); border: 1px solid rgba(245,158,11,.3); }
+      .mc-badge-live { background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.35); }
+      .mc-badge-done { background: rgba(74,222,128,.1); color: #4ade80; border: 1px solid rgba(74,222,128,.3); }
+
+      /* Phase track */
+      .mc-track {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 18px;
+      }
+      .mc-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .mc-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--s3);
+        border: 1.5px solid var(--bd);
+        transition: background 0.2s, box-shadow 0.2s;
+      }
+      .mc-node-active .mc-dot {
+        width: 10px;
+        height: 10px;
+        background: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37,99,255,.22);
+      }
+      .mc-node-done .mc-dot {
+        background: #4ade80;
+        border-color: #4ade80;
+      }
+      .mc-node-dim .mc-dot {
+        background: var(--s3);
+        border-color: var(--bd);
+        opacity: 0.45;
+      }
+      .mc-lbl {
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--muted2);
+        white-space: nowrap;
+      }
+      .mc-node-active .mc-lbl { color: var(--white); }
+      .mc-node-done .mc-lbl  { color: #4ade80; opacity: 0.75; }
+      .mc-line {
+        flex: 1;
+        height: 1.5px;
+        background: var(--bd);
+        margin-top: 4px;
+        align-self: flex-start;
+      }
+      .mc-line-done { background: rgba(74,222,128,.35); }
+
+      /* Action area */
+      .mc-actions { margin-bottom: 4px; }
+      .mc-action-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .mc-start-btn {
+        background: rgba(239,68,68,.08);
+        border: 1px solid rgba(239,68,68,.3);
+        color: var(--red);
+        padding: 11px 16px;
+        border-radius: var(--radius);
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        cursor: pointer;
+        width: 100%;
+        transition: background 0.15s;
+      }
+      .mc-start-btn:hover { background: rgba(239,68,68,.15); }
+      .mc-start-btn.mc-start-btn-muted { opacity: 0.4; border-style: dashed; }
+      .mc-finalize-btn {
+        background: rgba(74,222,128,.08);
+        border: 1px solid rgba(74,222,128,.3);
+        color: #4ade80;
+        padding: 11px 16px;
+        border-radius: var(--radius);
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        cursor: pointer;
+        width: 100%;
+        transition: background 0.15s;
+      }
+      .mc-finalize-btn:hover { background: rgba(74,222,128,.14); }
+      .mc-abandon-btn {
+        background: transparent;
+        border: 1px dashed rgba(245,158,11,.3);
+        color: rgba(245,158,11,.55);
+        padding: 8px 12px;
+        border-radius: var(--radius);
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+        width: 100%;
+        transition: all 0.15s;
+      }
+      .mc-abandon-btn:hover { color: var(--gold); border-color: rgba(245,158,11,.5); background: rgba(245,158,11,.05); }
+      .mc-hint {
+        font-size: 10px;
+        color: var(--muted2);
+        text-align: center;
+        letter-spacing: 0.3px;
+        margin: 0;
+      }
+
+      /* Danger zone — collapsed by default */
+      .mc-danger-wrap {
+        margin-top: 14px;
+        border-top: 1px solid var(--bd);
+        padding-top: 10px;
+      }
+      .mc-danger-summary {
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: rgba(255,68,68,.35);
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        outline: none;
+      }
+      .mc-danger-summary:hover { color: rgba(255,68,68,.6); }
+      .mc-danger-summary::-webkit-details-marker { display: none; }
+      .mc-danger-wrap[open] .mc-danger-summary { color: rgba(255,68,68,.55); margin-bottom: 2px; }
 
       /* ── STATS GRID ── */
       .stats-grid {
@@ -10890,8 +11065,8 @@
         background: var(--s1);
         border: 1px solid var(--bd);
         border-radius: var(--radius);
-        padding: 10px 12px;
-        margin-bottom: 12px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
       }
       .aa-label {
         font-family: "Barlow Condensed", sans-serif;
@@ -10902,12 +11077,18 @@
         text-transform: uppercase;
         margin-bottom: 8px;
       }
+      #finalizedMatchesList {
+        max-height: 120px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+      }
       .aa-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        padding: 6px 0;
+        gap: 8px;
+        padding: 4px 0;
         border-bottom: 1px solid var(--bd);
       }
       .aa-row:last-child {
@@ -11781,11 +11962,24 @@
           min-width: 64px;
         }
         .view-tabs {
-          gap: 0;
+          flex-wrap: wrap;
+          overflow-x: visible;
+          gap: 2px;
+          border-bottom: none;
+          padding-bottom: 8px;
         }
         .vtab {
-          padding: 9px 13px;
-          font-size: 13px;
+          padding: 8px 0;
+          font-size: 12px;
+          letter-spacing: 0.5px;
+          flex: 1 1 calc(33.333% - 4px);
+          min-width: 80px;
+          text-align: center;
+          border-bottom: 2px solid transparent;
+          border-radius: 6px 6px 0 0;
+        }
+        .vtab.active {
+          animation: none !important;
         }
         .hero-title {
           font-size: 17px;
@@ -11971,17 +12165,11 @@
           align-items: flex-start;
         }
 
-        /* Flow steps — wrap tightly */
-        .flow-steps {
-          gap: 3px;
-        }
-        .fs {
-          font-size: 10px;
-          padding: 2px 6px;
-        }
-        .fs-arrow {
-          font-size: 10px;
-        }
+        /* Match control track — tighten on small screens */
+        .mc-track { margin-bottom: 14px; }
+        .mc-dot { width: 7px; height: 7px; }
+        .mc-node-active .mc-dot { width: 9px; height: 9px; }
+        .mc-lbl { font-size: 8px; }
 
         /* Builder header */
         .bh-top {
@@ -12053,9 +12241,10 @@
           padding: 8px 8px;
         }
         .vtab {
-          padding: 8px 10px;
-          font-size: 12px;
-          letter-spacing: 0.5px;
+          padding: 7px 4px;
+          font-size: 11px;
+          letter-spacing: 0;
+          flex: 1 1 calc(33.333% - 4px);
         }
         .sc-inp {
           grid-template-columns: repeat(3, 1fr);
@@ -12170,13 +12359,14 @@
         /* Restore opaque backgrounds where blur was the only contrast */
         .cricket-score-bar, .match-bar, .csb-inn-team,
         .history-modal, .history-overlay { background-color: rgba(8,12,24,.97) !important; }
-        [data-theme='stellar-glass'] .cricket-score-bar,
-        [data-theme='stellar-glass'] .history-modal { background: rgba(15,20,40,.97) !important; }
 
         /* 3. Kill all infinite/looping animations */
         .breathingBlue, [style*="breathingBlue"],
         [style*="glowPulse"], [style*="revealPulse"],
         .acard, .pcard { animation-iteration-count: 1 !important; }
+        /* Kill neon/impact pulse on status dots — these fire on every player card */
+        .dot-green { animation: none !important; }
+        .dot-blue  { animation: none !important; }
 
         /* 4. Flatten shadows — compositing many box-shadows forces repaints */
         .acard, .pcard, .lb-card, .hm-card, .stat-card {
@@ -12973,7 +13163,7 @@
     ═══════════════════════════════════════════════════ -->
     <script>
     (function() {
-      var VALID_THEMES = ['titanium-gold', 'electric-ahmedabad', 'plum-noir', 'midnight', 'dracula', 'github-dimmed', 'monokai-pro', 'cyber-marine', 'sakura-night', 'retro-terminal', 'stellar-glass', 'emerald-pitch', 'solar-flare', 'aurora-borealis', 'royal-bengal'];
+      var VALID_THEMES = ['titanium-gold', 'electric-ahmedabad', 'plum-noir', 'midnight', 'dracula', 'github-dimmed', 'monokai-pro', 'sakura-night', 'retro-terminal', 'emerald-pitch', 'solar-flare', 'aurora-borealis', 'royal-bengal', 'volcanic-obsidian', 'deep-cosmos', 'bronze-circuit'];
 
       /* ── Apply theme: Task 4 logic ── */
       window.setDashboardTheme = function(themeName) {
