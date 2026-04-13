@@ -239,7 +239,17 @@
       }
       async function _cricFetch(url, opts) {
         if (!_trackApiCall()) throw new Error("CricAPI daily quota exhausted (2000 calls)");
-        return fetch(url, opts);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout
+        try {
+          const res = await fetch(url, { ...opts, signal: controller.signal });
+          clearTimeout(timeout);
+          return res;
+        } catch (e) {
+          clearTimeout(timeout);
+          if (e.name === 'AbortError') throw new Error("CricAPI request timed out");
+          throw e;
+        }
       }
       let playerStatus = {}; // { playerName: 'playing'|'notplaying'|'impact' }
       let matchUnsubs = {}; // { [matchId]: unsubFn }
@@ -970,6 +980,8 @@
       window.autoFetchStats = (fb) => autoFetchStats(fb);
       window.switchTab = function (t) {
         history.replaceState({}, "", `${location.pathname}?tab=${t}`);
+        // Reset scroll before swapping content so viewport is stable
+        window.scrollTo({ top: 0, behavior: "instant" });
         const tabBody = document.getElementById("tab-body");
         if (tabBody) {
           // Only swap content — leave view-tabs and match-selector untouched
@@ -1380,8 +1392,8 @@
           return `
             <div class="csb-team-zone ${zoneClass} ${isBatting ? 'is-batting' : ''}" data-team-key="${key}" style="--batting-color:${zoneColor}; background:linear-gradient(135deg, ${zoneColor}1a 0%, transparent 65%);">
               <div class="csb-inn-team">${label}${isBatting ? ' · LIVE' : ''}</div>
-              <div class="csb-big-score">${s.r || 0}/${s.w || 0}</div>
-              <div class="csb-overs">${parseFloat(s.o || 0).toFixed(1)} <small>ov</small></div>
+              <div class="csb-big-score">${s.r || 0}<span class="csb-wkts-sep">-${s.w || 0}</span></div>
+              <div class="csb-overs">${parseFloat(s.o || 0).toFixed(1)} <span class="csb-ov-label">ov</span></div>
             </div>`;
         }).join('');
 
@@ -3297,7 +3309,10 @@
             total: memberMatchTotal(getTeams(activeMid)[n] || {}, getStats(activeMid)),
             submitted: !!(getTeams(activeMid)[n] || {}).submitted,
           }))
-          .sort((a, b) => b.total - a.total);
+          .sort((a, b) => {
+            if (a.submitted !== b.submitted) return a.submitted ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
         // Other active matches (not the currently selected one)
         const otherActiveMatches = Object.entries(activeMatches).filter(
           ([mid]) => mid !== activeMid && !getMatch(mid).finalized,
@@ -3305,7 +3320,7 @@
 
         const _atc = getTeamColor(viewMatch);
         return `
-  <div class="admin-3col">
+  <div class="admin-2col">
 
     <!-- ── COL 1: Match Setup + Control ── -->
     <div class="acol">
@@ -3423,7 +3438,7 @@
 
     </div>
 
-    <!-- ── COL 2: CricAPI + Player Pool ── -->
+    <!-- ── COL 2: CricAPI + Player Pool + Submissions + Leaderboard ── -->
     <div class="acol">
       <div class="acard">
         <div class="acard-t">🔑 CricketAPI & Players</div>
@@ -3497,25 +3512,29 @@
         </div>
 
       </div>
-    </div>
 
-    <!-- ── COL 3: Submissions + Live Leaderboard ── -->
-    <div class="acol">
-
+      <!-- Submissions below CricAPI -->
       <div class="acard">
         <div class="acard-t">👥 Submissions <span style="color:var(--muted2);font-size:12px;font-weight:500;letter-spacing:0">${subs}/${members.length}</span></div>
         ${!members.length ? '<p class="muted">No members yet.</p>' : ""}
-        ${ranked
-          .map(
-            (r, i) => `
-        <div class="mrow">
-          <span class="mrow-r">${i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "#" + (i + 1)}</span>
-          <span class="mrow-n">${r.name}</span>
-          <span class="mrow-s ${r.submitted ? "s-yes" : "s-no"}">${r.submitted ? "✓" : "—"}</span>
-          ${revealed ? `<span class="mrow-p">${r.total}pts</span>` : ""}
-        </div>`,
-          )
-          .join("")}
+        <div class="subs-list">
+          ${(() => {
+            const submitted = ranked.filter(r => r.submitted);
+            const pending   = ranked.filter(r => !r.submitted);
+            const rowHtml = (r) => `
+              <div class="mrow">
+                <span class="mrow-s ${r.submitted ? "s-yes" : "s-no"}" style="font-size:13px;min-width:14px">${r.submitted ? "✓" : "–"}</span>
+                <span class="mrow-n">${r.name}</span>
+                ${revealed ? `<span class="mrow-p">${r.total}pts</span>` : ""}
+              </div>`;
+            let html = submitted.map(rowHtml).join('');
+            if (submitted.length && pending.length) {
+              html += `<div class="subs-divider">Pending</div>`;
+            }
+            html += pending.map(rowHtml).join('');
+            return html;
+          })()}
+        </div>
       </div>
 
       ${revealed ? renderMatchLeaderboard({ ...getMatch(activeMid), stats: playerStats, teams: allTeams }, activeMid, null) : ""}
@@ -3594,7 +3613,28 @@
         if (!text.trim()) { toast("Paste a list of names first", "err"); return; }
 
         const pool = getPlayers(activeMid);
-        const poolNames = pool.map(p => ({ name: p.name, clean: p.name.toLowerCase().replace(/[^a-z]/g, '') }));
+        const poolNames = pool.map(p => {
+          const lower = p.name.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+          const words = lower.split(/\s+/).filter(w => w.length > 0);
+          return { name: p.name, clean: lower.replace(/\s/g, ''), words };
+        });
+
+        // 1-char edit distance (same length names only, e.g. Ahmad↔Ahmed)
+        function nearMatch(a, b) {
+          if (a === b) return true;
+          if (Math.abs(a.length - b.length) > 1 || a.length < 4) return false;
+          let diffs = 0;
+          const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+          let si = 0, li = 0;
+          while (si < shorter.length && li < longer.length) {
+            if (shorter[si] !== longer[li]) {
+              diffs++;
+              if (diffs > 1) return false;
+              if (shorter.length === longer.length) { si++; li++; } else li++;
+            } else { si++; li++; }
+          }
+          return diffs <= 1;
+        }
 
         const update = {};
         let foundCount = 0;
@@ -3602,34 +3642,51 @@
 
         // Split text into lines to detect headers dynamically
         const lines = text.split(/\n/);
-        
+
         lines.forEach(line => {
           const lowerLine = line.toLowerCase();
-          
+
           // Header detection: Switch modes based on what we find in the line
           const isImpactLine = lowerLine.includes("impact") || lowerLine.includes("substitutes");
           const isPlayingLine = lowerLine.includes("playing xi") || lowerLine.includes("(playing xi)") || lowerLine.includes("starting xi");
 
+          // Strip the header prefix so the first player name on the same line isn't swallowed.
+          // e.g. "LSG Impact Subs - Manimaran Siddharth, George Linde" → "Manimaran Siddharth, George Linde"
+          let nameLine = line;
           if (isImpactLine && !isPlayingLine) {
             currentStatus = "impact";
+            nameLine = nameLine.replace(/^[^,]*?(?:impact\s*sub(?:stitute)?s?|substitutes)\s*[-:–—]?\s*/i, '');
           } else if (isPlayingLine) {
             currentStatus = "playing";
+            nameLine = nameLine.replace(/^[^,]*?(?:playing\s*xi|starting\s*xi)\s*[-:–—]?\s*/i, '');
           }
 
           // Split line by common separators
-          const namesInLine = line.split(/[,;\t:]|(?:\s+vs\s+)/i).map(n => n.trim()).filter(n => n.length > 2);
-          
+          const namesInLine = nameLine.split(/[,;\t:]|(?:\s+vs\s+)/i).map(n => n.trim()).filter(n => n.length > 2);
+
           namesInLine.forEach(raw => {
             // Clean markers and ignore parentheses
             const cleanRaw = raw.toLowerCase().replace(/\(.*?\)/g, "").replace(/[^a-z\s]/gi, "").trim();
             const search = cleanRaw.replace(/[^a-z]/g, "");
-            if (!search) return;
+            const inputWords = cleanRaw.split(/\s+/).filter(w => w.length > 0);
+            const inputLast = inputWords[inputWords.length - 1] || "";
+            if (!search || search.length < 3) return;
 
-            // Fuzzy match
+            // 1. Exact / contains match (space-stripped)
             let hit = poolNames.find(p => p.clean === search || p.clean.includes(search) || search.includes(p.clean));
-            if (!hit) {
-              const lastWord = search.substring(search.length - 5);
-              hit = poolNames.find(p => p.clean.endsWith(lastWord));
+
+            // 2. Last-name match with 1-char edit distance tolerance (handles Ahmad↔Ahmed etc.)
+            if (!hit && inputLast.length >= 4) {
+              hit = poolNames.find(p => {
+                const poolLast = p.words[p.words.length - 1] || '';
+                return nearMatch(poolLast, inputLast);
+              });
+            }
+
+            // 3. Last-5-char suffix fallback
+            if (!hit && search.length >= 5) {
+              const lastFive = search.substring(search.length - 5);
+              hit = poolNames.find(p => p.clean.endsWith(lastFive));
             }
 
             if (hit) {
@@ -3902,6 +3959,149 @@
             if (box) box.value = "";
           })
           .catch(function(e) { toast("Save error: " + e.message, "err"); });
+      };
+
+      window.parseJsonScorecard = async function() {
+        const activeMid = getActiveMid();
+        if (!activeMid) { toast("Create a match first", "err"); return; }
+        const raw = document.getElementById("pasteJsonScorecardBox").value.trim();
+        if (!raw) { toast("Paste CricAPI JSON first", "err"); return; }
+
+        let data;
+        try { data = JSON.parse(raw); } catch(e) { toast("Invalid JSON — check paste", "err"); return; }
+
+        // Accept both a full API response envelope or just the .data payload
+        const payload = data.data || data;
+        const sc = payload.scorecard || payload.score_card || [];
+        if (!sc.length) { toast("No scorecard found in JSON", "err"); return; }
+
+        const pool = getPlayers(activeMid);
+        if (!pool.length) { toast("No players in pool — load match first", "err"); return; }
+
+        // Build name lookup (same as autoFetchStats poller)
+        const nl = {};
+        pool.forEach(p => {
+          const clean = p.name.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+          nl[clean] = p.name;
+          (p.altnames || []).forEach(alt => { nl[alt.toLowerCase().replace(/[^a-z\s]/g, '').trim()] = p.name; });
+        });
+        const nlKeys = Object.keys(nl);
+
+        function robustMatch(name) {
+          if (!name) return null;
+          const clean = name.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+          if (!clean) return null;
+          if (nl[clean]) return clean;
+          const hit = nlKeys.find(k => k.includes(clean) || clean.includes(k));
+          if (hit) return hit;
+          const parts = clean.split(/\s+/);
+          if (parts.length >= 2) {
+            const fi = parts[0][0], last = parts[parts.length - 1];
+            const ih = nlKeys.find(k => { const kp = k.split(/\s+/); return kp.length >= 2 && kp[0][0] === fi && kp[kp.length-1] === last; });
+            if (ih) return ih;
+          }
+          const lastWord = parts[parts.length - 1];
+          if (lastWord.length >= 4) { const lh = nlKeys.find(k => k.endsWith(lastWord)); if (lh) return lh; }
+          return null;
+        }
+
+        function toRealOvers(o) { const w = Math.floor(o), b = Math.round((o - w) * 10); return w + b / 6; }
+
+        const batAcc = {}, bowlAcc = {}, catchAcc = {};
+        const statsUpdate = {};
+
+        sc.forEach(inn => {
+          (inn.batting || []).forEach(b => {
+            const m = robustMatch(b.batsman?.name || b.name || "");
+            if (!m) return;
+            const n = nl[m];
+            if (playerStatus[n] !== "playing") statsUpdate[`playerStatus.${n}`] = "playing";
+            const balls = b.b || 0, runs = b.r || 0;
+            const dismissed = b.dismissal && !["not out","retired hurt","retired ill"].includes((b.dismissal||"").toLowerCase());
+            if (balls === 0 && runs === 0 && !dismissed) return;
+            if (!batAcc[n]) batAcc[n] = { runs:0, balls:0, fours:0, sixes:0, batted:false, notOut:false };
+            batAcc[n].runs += runs; batAcc[n].balls += balls;
+            batAcc[n].fours += b["4s"] || 0; batAcc[n].sixes += b["6s"] || 0;
+            batAcc[n].batted = true; batAcc[n].notOut = !dismissed;
+          });
+          (inn.bowling || []).forEach(bw => {
+            const m = robustMatch(bw.bowler?.name || bw.name || "");
+            if (!m) return;
+            const n = nl[m];
+            if (!bowlAcc[n]) bowlAcc[n] = { wickets:0, overs:0, runsConceded:0, maidens:0, lbwBowled:0 };
+            bowlAcc[n].wickets += bw.w || 0;
+            bowlAcc[n].overs = Math.round((bowlAcc[n].overs + toRealOvers(parseFloat(bw.o||bw.ov)||0)) * 1000) / 1000;
+            bowlAcc[n].runsConceded += bw.r || 0;
+            bowlAcc[n].maidens += bw.m || 0;
+            if (bw.eco != null) bowlAcc[n]._lastEco = bw.eco;
+            if (playerStatus[n] !== "playing") statsUpdate[`playerStatus.${n}`] = "playing";
+          });
+          (inn.catching || []).forEach(c => {
+            if (c.catcher?.name) {
+              const mC = robustMatch(c.catcher.name);
+              if (mC) {
+                const nC = nl[mC];
+                if (!catchAcc[nC]) catchAcc[nC] = { catches:0, stumpings:0, runOutIndirect:0 };
+                catchAcc[nC].catches += (c.catch||0) + (c.cb||0);
+                catchAcc[nC].stumpings += c.stumped||0;
+                catchAcc[nC].runOutIndirect += c.runout||0;
+              }
+            }
+            if (c.bowler?.name && (c.lbw || c.bowled)) {
+              const mB = robustMatch(c.bowler.name);
+              if (mB) {
+                const nB = nl[mB];
+                if (!bowlAcc[nB]) bowlAcc[nB] = { wickets:0, overs:0, runsConceded:0, maidens:0, lbwBowled:0 };
+                bowlAcc[nB].lbwBowled += (c.lbw||0) + (c.bowled||0);
+              }
+            }
+          });
+        });
+
+        let updated = 0;
+        Object.entries(batAcc).forEach(([n, s]) => {
+          playerStats[n] = { ...(playerStats[n]||{}), ...s, playingXI: true };
+          statsUpdate[`stats.${n}.runs`] = s.runs; statsUpdate[`stats.${n}.balls`] = s.balls;
+          statsUpdate[`stats.${n}.fours`] = s.fours; statsUpdate[`stats.${n}.sixes`] = s.sixes;
+          statsUpdate[`stats.${n}.batted`] = s.batted; statsUpdate[`stats.${n}.notOut`] = s.notOut;
+          statsUpdate[`stats.${n}.playingXI`] = true; updated++;
+        });
+        Object.entries(bowlAcc).forEach(([n, s]) => {
+          const eco = s._lastEco != null ? s._lastEco : (s.overs >= 2 ? Math.round((s.runsConceded/s.overs)*10)/10 : null);
+          const { _lastEco, ...clean } = s;
+          playerStats[n] = { ...(playerStats[n]||{}), ...clean, eco, playingXI: true };
+          statsUpdate[`stats.${n}.wickets`] = clean.wickets; statsUpdate[`stats.${n}.overs`] = clean.overs;
+          statsUpdate[`stats.${n}.runsConceded`] = clean.runsConceded; statsUpdate[`stats.${n}.maidens`] = clean.maidens;
+          statsUpdate[`stats.${n}.lbwBowled`] = clean.lbwBowled; if (eco != null) statsUpdate[`stats.${n}.eco`] = eco;
+          statsUpdate[`stats.${n}.playingXI`] = true; updated++;
+        });
+        Object.entries(catchAcc).forEach(([n, s]) => {
+          playerStats[n] = { ...(playerStats[n]||{}), playingXI: true };
+          if (s.catches > 0) { playerStats[n].catches = s.catches; statsUpdate[`stats.${n}.catches`] = s.catches; }
+          if (s.stumpings > 0) { playerStats[n].stumpings = s.stumpings; statsUpdate[`stats.${n}.stumpings`] = s.stumpings; }
+          if (s.runOutIndirect > 0) { playerStats[n].runOutIndirect = s.runOutIndirect; statsUpdate[`stats.${n}.runOutIndirect`] = s.runOutIndirect; }
+          statsUpdate[`stats.${n}.playingXI`] = true; updated++;
+        });
+
+        // Score + status
+        const scoreArr = payload.score || payload.scores || [];
+        const matchStatus = payload.status || payload.matchStatus || "";
+        if (scoreArr.length) statsUpdate["score"] = scoreArr;
+        if (matchStatus) statsUpdate["matchStatus"] = matchStatus;
+
+        if (!updated) { toast("No matching players found in JSON", "err"); return; }
+
+        try {
+          skipNextRefresh = true;
+          await updateDoc(doc(db, "matches", activeMid), statsUpdate);
+          toast(`✅ JSON parsed — ${updated} players updated. Hit Save All to confirm.`);
+          document.getElementById("pasteJsonScorecardBox").value = "";
+          const grid = document.getElementById("statsGrid");
+          if (grid) { grid.innerHTML = renderStatsGrid(""); bindSave(); bindAvailSelects(); triggerCountUp(); }
+        } catch(e) {
+          skipNextRefresh = false;
+          toast("Save error: " + e.message, "err");
+        }
       };
 
       // Fix 3 — Ghost-stat sanitization helper
@@ -4726,24 +4926,25 @@
 
         const activeMid = getActiveMid();
 
-        if (_addingAnotherMatch) {
-          // Create a brand new additional match
-          await createNewMatch(label, t1, t2, isIPL, false, matchType, liveMatchId);
-          _addingAnotherMatch = false;
-        } else if (activeMid && !currentMatch.finalized) {
-          // Update the currently selected match
-          await updateDoc(doc(db, "matches", activeMid), {
-            label,
-            liveMatchId,
-            t1,
-            t2,
-            isIPL,
-            matchType,
-          });
-          toast("Match updated");
-        } else {
-          // Create first/new primary match
-          await createNewMatch(label, t1, t2, isIPL, true, matchType, liveMatchId);
+        try {
+          if (_addingAnotherMatch) {
+            await createNewMatch(label, t1, t2, isIPL, false, matchType, liveMatchId);
+            _addingAnotherMatch = false;
+          } else if (activeMid && !currentMatch.finalized) {
+            await updateDoc(doc(db, "matches", activeMid), {
+              label,
+              liveMatchId,
+              t1,
+              t2,
+              isIPL,
+              matchType,
+            });
+            toast("Match updated");
+          } else {
+            await createNewMatch(label, t1, t2, isIPL, true, matchType, liveMatchId);
+          }
+        } catch (e) {
+          toast("Error: " + e.message, "err");
         }
         // Firestore onSnapshot triggers refreshView() — no explicit reload needed
       }
@@ -4817,7 +5018,12 @@
           updates.currentMatchId = "";
         }
 
-        await updateDoc(doc(db, "meta", "game"), updates);
+        try {
+          await updateDoc(doc(db, "meta", "game"), updates);
+        } catch (e) {
+          toast("Error removing match: " + e.message, "err");
+          return;
+        }
 
         // Update local metaGame cache immediately so re-render reflects removal
         metaGame.activeMatchIds = newIds;
@@ -4860,19 +5066,46 @@
         btn.textContent = "Saving…";
         btn.disabled = true;
         const activeMid = getActiveMid();
+        if (!activeMid) {
+          toast("No active match selected", "err");
+          btn.textContent = "✅ Finalize & Save to Season";
+          btn.disabled = false;
+          return;
+        }
+        // Block onSnapshot re-renders for the duration of finalization to prevent
+        // intermediate flashes (season updated but match not yet finalized)
+        skipNextRefresh = true;
         try {
-          const stats = getStats(activeMid);
-          const teams = getTeams(activeMid);
-          const match = getMatch(activeMid);
+          // Always fetch FRESH data from Firestore — never use in-memory cache here.
+          // If admin just hit "Save All" then immediately "Finalize", the onSnapshot
+          // may not have propagated the latest stats into activeMatches yet.
+          const [matchSnap, stSnap] = await Promise.all([
+            getDoc(doc(db, "matches", activeMid)),
+            getDoc(doc(db, "season", "totals")),
+          ]);
+          if (!matchSnap.exists()) throw new Error("Match not found");
+          const freshMatch = matchSnap.data();
+          const stats  = freshMatch.stats  || {};
+          const teams  = freshMatch.teams  || {};
+          const match  = freshMatch;
+
+          // Guard: prevent double-finalize from corrupting totals
+          // (allow re-finalize only from the finalized state — "Update Finalized")
+          if (freshMatch.finalized && !confirm("Match already finalized. Re-save updated points?")) {
+            btn.textContent = "♻️ Update Finalized";
+            btn.disabled = false;
+            skipNextRefresh = false;
+            return;
+          }
+
           const members = Object.keys(allMembers);
-          const stSnap = await getDoc(doc(db, "season", "totals"));
           const totals = stSnap.exists() ? stSnap.data() : {};
 
           members.forEach((name) => {
             const t = teams[name] || {};
             const pts = memberMatchTotal(t, stats);
             if (!totals[name]) totals[name] = { total: 0, matches: [] };
-            
+
             const existingIdx = totals[name].matches.findIndex(m => m.matchId === activeMid);
             if (existingIdx !== -1) {
               // UPDATE: Subtract old points, add new ones
@@ -4891,10 +5124,11 @@
             }
           });
 
+          // Write season totals + finalized flag together before releasing the refresh block
           await setDoc(doc(db, "season", "totals"), totals, { merge: true });
           await updateDoc(doc(db, "matches", activeMid), { finalized: true });
 
-          // Remove finalized match from activeMatchIds and clear currentMatchId if it's the finalized match
+          // Remove finalized match from activeMatchIds and clear currentMatchId if needed
           const remaining = (metaGame.activeMatchIds || []).filter(
             (id) => id !== activeMid,
           );
@@ -4904,7 +5138,12 @@
           }
           await updateDoc(doc(db, "meta", "game"), updates);
 
+          // Reset selected match synchronously so the next refreshView shows a clean state
+          adminSelectedMatchId = remaining[0] || null;
+
           stopAR();
+          // Release refresh block — next onSnapshot will show fully-consistent state
+          skipNextRefresh = false;
           
           (function launchFireworks(){
             const fw = document.createElement('canvas');
@@ -5008,6 +5247,7 @@
 
           toast("Match finalized! Points saved to season table ✅");
         } catch (e) {
+          skipNextRefresh = false;
           toast("Error: " + e.message, "err");
           btn.textContent = "✅ Finalize & Save to Season";
           btn.disabled = false;
@@ -5017,6 +5257,7 @@
       // ── Abandon Match (No Result — keep accumulated points) ──
       async function abandonMatch() {
         const activeMid = getActiveMid();
+        if (!activeMid) { toast("No active match selected", "err"); return; }
         if (getMatch(activeMid)?.finalized || getMatch(activeMid)?.abandoned) { toast("Match already finalized or abandoned", "err"); return; }
         if (
           !confirm(
@@ -5024,9 +5265,19 @@
           )
         )
           return;
+        skipNextRefresh = true;
         try {
+          // Fresh read from Firestore — avoids stale cache for point calculations
+          const [matchSnap, stSnap] = await Promise.all([
+            getDoc(doc(db, "matches", activeMid)),
+            getDoc(doc(db, "season", "totals")),
+          ]);
+          if (!matchSnap.exists()) throw new Error("Match not found");
+          const freshMatch = matchSnap.data();
+          const rawStats = freshMatch.stats || {};
+          const teams = freshMatch.teams || {};
+
           // Deep-copy stats and auto-protect any batter on 0* (was playing when match stopped)
-          const rawStats = getStats(activeMid);
           const stats = {};
           const firestoreUpdate = {};
           Object.keys(rawStats).forEach((p) => {
@@ -5041,11 +5292,8 @@
           if (Object.keys(firestoreUpdate).length) {
             await updateDoc(doc(db, "matches", activeMid), firestoreUpdate);
           }
-          // Save points to season totals (same as finalizeMatch)
-          const teams = getTeams(activeMid);
-          const match = getMatch(activeMid);
+          // Save points to season totals
           const members = Object.keys(allMembers);
-          const stSnap = await getDoc(doc(db, "season", "totals"));
           const totals = stSnap.exists() ? stSnap.data() : {};
           members.forEach((name) => {
             const t = teams[name] || {};
@@ -5057,7 +5305,7 @@
                 ...(totals[name].matches || []),
                 {
                   matchId: activeMid,
-                  label: (match.label || "Match") + " 🌧️",
+                  label: (freshMatch.label || "Match") + " 🌧️",
                   pts,
                 },
               ];
@@ -5076,9 +5324,12 @@
             updates.currentMatchId = remaining[0] || "";
           }
           await updateDoc(doc(db, "meta", "game"), updates);
+          adminSelectedMatchId = remaining[0] || null;
           stopAR();
+          skipNextRefresh = false;
           toast("Match abandoned — points saved 🌧️");
         } catch (e) {
+          skipNextRefresh = false;
           toast("Error: " + e.message, "err");
         }
       }
@@ -5164,14 +5415,18 @@
             );
             if (xiCb)
               xiCb.checked = playerStats[name]?.playingXI ?? xiCb.checked;
-            await updateDoc(doc(db, "matches", activeMid), update);
-            // Update local playerStatus immediately
-            playerStatus[name] = status;
-            toast(
-              status
-                ? `${name} → ${status === "playing" ? "🟢 Playing XI" : status === "notplaying" ? "🔴 Not Playing" : "🔵 Impact Sub"}`
-                : `${name} status cleared`,
-            );
+            try {
+              await updateDoc(doc(db, "matches", activeMid), update);
+              // Update local playerStatus immediately
+              playerStatus[name] = status;
+              toast(
+                status
+                  ? `${name} → ${status === "playing" ? "🟢 Playing XI" : status === "notplaying" ? "🔴 Not Playing" : "🔵 Impact Sub"}`
+                  : `${name} status cleared`,
+              );
+            } catch (e) {
+              toast("Error updating status: " + e.message, "err");
+            }
           });
         });
       }
@@ -5185,6 +5440,7 @@
         try {
           const statsUpdate = {};
           const activeMid = getActiveMid();
+          if (!activeMid) { toast("No active match selected", "err"); return; }
           // Collect all stat inputs
           document.querySelectorAll(".si").forEach((i) => {
             const p = i.dataset.p,
@@ -5255,8 +5511,10 @@
             playerStats[p] = data;
             btn.textContent = "Saving…";
             btn.disabled = true;
+            const _saveMid = getActiveMid();
+            if (!_saveMid) { toast("No active match", "err"); btn.textContent = "💾 Save"; btn.disabled = false; return; }
             try {
-              await updateDoc(doc(db, "matches", getActiveMid()), {
+              await updateDoc(doc(db, "matches", _saveMid), {
                 [`stats.${p}`]: data,
               });
               // Fix 1+3 — recalculate pts immediately and update this card's display
@@ -5371,15 +5629,16 @@
         }
         const currentPlayers = getPlayers(activeMid);
         const updated = currentPlayers.filter((p) => p.name !== name);
-        await updateDoc(doc(db, "matches", activeMid), {
-          players: updated,
-        });
-        // Update local cache
-        if (activeMatches[activeMid]) {
-          activeMatches[activeMid].players = updated;
+        try {
+          await updateDoc(doc(db, "matches", activeMid), { players: updated });
+          if (activeMatches[activeMid]) {
+            activeMatches[activeMid].players = updated;
+          }
+          syncDerivedState();
+          toast(`${name} removed`);
+        } catch (e) {
+          toast("Error removing player: " + e.message, "err");
         }
-        syncDerivedState();
-        toast(`${name} removed`);
       };
 
       async function addPlayerManually() {
@@ -5413,12 +5672,15 @@
         }
         const updated = [...currentPlayers, { name, team, role }];
 
-        // Set flag to skip the Firebase-triggered refresh
         skipNextRefresh = true;
+        try {
+          await updateDoc(doc(db, "matches", activeMid), { players: updated });
+        } catch (e) {
+          skipNextRefresh = false;
+          toast("Error adding player: " + e.message, "err");
+          return;
+        }
 
-        await updateDoc(doc(db, "matches", activeMid), {
-          players: updated,
-        });
         // Update local cache
         if (activeMatches[activeMid]) {
           activeMatches[activeMid].players = updated;
@@ -5456,14 +5718,16 @@
               const updated = currentPlayers.map((p) =>
                 p.name === playerName ? { ...p, role: e.target.value } : p,
               );
-              await updateDoc(doc(db, "matches", activeMid), {
-                players: updated,
-              });
-              if (activeMatches[activeMid]) {
-                activeMatches[activeMid].players = updated;
+              try {
+                await updateDoc(doc(db, "matches", activeMid), { players: updated });
+                if (activeMatches[activeMid]) {
+                  activeMatches[activeMid].players = updated;
+                }
+                syncDerivedState();
+                toast(`✓ ${playerName} → ${e.target.value}`);
+              } catch (e) {
+                toast("Error: " + e.message, "err");
               }
-              syncDerivedState();
-              toast(`✓ ${playerName} → ${e.target.value}`);
             });
           }
 
@@ -5486,13 +5750,16 @@
           toast("No active match", "err");
           return;
         }
-        await updateDoc(doc(db, "matches", activeMid), { players: [] });
-        // Update local cache
-        if (activeMatches[activeMid]) {
-          activeMatches[activeMid].players = [];
+        try {
+          await updateDoc(doc(db, "matches", activeMid), { players: [] });
+          if (activeMatches[activeMid]) {
+            activeMatches[activeMid].players = [];
+          }
+          syncDerivedState();
+          toast("Player pool cleared");
+        } catch (e) {
+          toast("Error clearing pool: " + e.message, "err");
         }
-        syncDerivedState();
-        toast("Player pool cleared");
       }
 
       // Known IPL 2026 series ID — used as fallback when no IPL matches in currentMatches
@@ -6117,6 +6384,7 @@
 
           if (players.length > 0) {
             const targetMid = firestoreMatchId || getActiveMid();
+            if (!targetMid) { toast("No active match to load players into", "err"); return; }
             await updateDoc(doc(db, "matches", targetMid), { players });
             toast(`Loaded ${players.length} players for match`);
           }
@@ -7742,7 +8010,7 @@
         -webkit-backdrop-filter: blur(20px);
         backdrop-filter: blur(20px);
         z-index: 10;
-        will-change: transform;
+        /* will-change: transform intentionally removed — breaks position:sticky on iOS Safari */
       }
       .nav-brand {
         font-family: "Barlow Condensed", sans-serif;
@@ -8901,7 +9169,7 @@
         position: relative;
         display: flex;
         flex-direction: column;
-        transition: all 0.3s ease;
+        transition: border-color 0.3s ease, background 0.3s ease;
       }
 
       .csb-home-zone { border-bottom: 3px solid var(--team-home-primary); }
@@ -8934,19 +9202,43 @@
       }
 
       .csb-big-score {
-        font-family: 'Bebas Neue', 'Barlow Condensed', sans-serif;
-        font-size: clamp(32px, 6vw, 44px);
-        font-weight: 400;
-        letter-spacing: 2px;
-        color: var(--batting-color, var(--white));
-        text-shadow: 0 0 28px color-mix(in srgb, var(--batting-color, #fff), transparent 45%);
-        line-height: 1.1;
+        font-family: 'Barlow Condensed', sans-serif;
+        font-size: clamp(42px, 9vw, 56px);
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        color: #ffffff; /* fallback: older Android/iOS without color-mix */
+        color: color-mix(in srgb, var(--batting-color, #ffffff), white 45%);
+        text-shadow: 0 2px 8px rgba(0,0,0,0.75);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Wickets: same color, slightly smaller */
+      .csb-wkts-sep {
+        font-size: 0.75em;
+        font-weight: 800;
+        opacity: 0.92;
+        letter-spacing: 0;
+      }
+
+      /* Non-batting team during live play: dimmed — only fires when some team IS batting */
+      .csb-zones-row:has(.is-batting) .csb-team-zone:not(.is-batting) .csb-big-score {
+        opacity: 0.52;
       }
 
       .csb-overs {
-        font-size: 13px;
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.55);
+        font-family: 'Barlow Condensed', sans-serif;
+        font-size: 15px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.88);
+        letter-spacing: 0.5px;
+        margin-top: 2px;
+      }
+
+      .csb-ov-label {
+        font-weight: 600;
+        opacity: 0.72;
+        font-size: 0.85em;
       }
 
       .csb-context-bar {
@@ -9017,7 +9309,7 @@
         font-family: 'Barlow Condensed', sans-serif;
         font-size: 14px;
         font-weight: 700;
-        color: rgba(255,255,255,0.75);
+        color: rgba(255,255,255,0.92);
         text-transform: uppercase;
         letter-spacing: 0.5px;
         white-space: nowrap;
@@ -9029,14 +9321,14 @@
         font-family: var(--font-num);
         font-size: 16px;
         font-weight: 700;
-        color: rgba(255,255,255,0.8);
+        color: #ffffff;
         white-space: nowrap;
       }
 
       .csb-score-balls {
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
-        opacity: 0.6;
+        opacity: 0.72;
         margin-left: 3px;
       }
 
@@ -9090,9 +9382,9 @@
       }
 
       .csb-bowler-ov {
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
-        color: rgba(255, 255, 255, 0.4);
+        color: rgba(255, 255, 255, 0.72);
       }
 
       /* Status Badges */
@@ -10065,11 +10357,11 @@
 ═══════════════════════════════════════════ */
       .admin-2col {
         display: grid;
-        grid-template-columns: 300px 1fr;
+        grid-template-columns: 320px 1fr;
         gap: 16px;
         align-items: start;
       }
-      @media (max-width: 860px) {
+      @media (max-width: 900px) {
         .admin-2col {
           grid-template-columns: 1fr;
         }
@@ -10244,6 +10536,32 @@
         font-family: "DM Mono", monospace;
         font-size: 13px;
         color: var(--gold);
+      }
+      .subs-list {
+        max-height: 240px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        margin: 0 -4px;
+        padding: 0 4px;
+      }
+      .subs-list::-webkit-scrollbar {
+        width: 3px;
+      }
+      .subs-list::-webkit-scrollbar-thumb {
+        background: var(--bd2);
+        border-radius: 2px;
+      }
+      .subs-divider {
+        font-family: "Barlow Condensed", sans-serif;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted2);
+        padding: 6px 0 3px;
+        border-top: 1px solid var(--bd);
+        margin-top: 2px;
       }
       .muted {
         color: var(--muted2);
@@ -12364,13 +12682,24 @@
         .breathingBlue, [style*="breathingBlue"],
         [style*="glowPulse"], [style*="revealPulse"],
         .acard, .pcard { animation-iteration-count: 1 !important; }
-        /* Kill neon/impact pulse on status dots — these fire on every player card */
+        /* Kill neon/impact/live pulse on status dots and badges — fire on every player card */
         .dot-green { animation: none !important; }
         .dot-blue  { animation: none !important; }
+        /* Kill remaining animated box-shadows not caught above */
+        .sp-badge-live { animation: none !important; }
+        [class*="playing-badge"], .playing-badge-dot { animation: none !important; }
+        .pv2-striker-dot, .pv2-bowler-dot { animation: none !important; }
+        [style*="livePulse"], [style*="playingPulse"], [style*="neonPulse"] { animation: none !important; }
+        /* Kill inline-style animations (higher specificity override) */
+        [style*="animation"] { animation-iteration-count: 1 !important; }
 
         /* 4. Flatten shadows — compositing many box-shadows forces repaints */
         .acard, .pcard, .lb-card, .hm-card, .stat-card {
           box-shadow: 0 2px 8px rgba(0,0,0,.35) !important;
+        }
+        /* Flatten modal/overlay shadows */
+        .history-modal, .modal, .msv, .modal-large {
+          box-shadow: 0 4px 16px rgba(0,0,0,.5) !important;
         }
 
         /* 5. Contain layout/paint per card — skip off-screen layout.
@@ -12380,12 +12709,31 @@
         }
 
         /* 6. Prevent scroll chaining / rubber-band on nested scrollers */
-        .stats-grid, .history-modal, .msv {
+        .stats-grid, .history-modal, .msv, .subs-list {
           overscroll-behavior: contain;
         }
 
         /* 7. Ambient layer opacity */
         body::after { opacity: 0.06 !important; }
+
+        /* 8. Reduce score-pill blur — sticky + full blur causes iOS scroll stutter */
+        .score-pill {
+          backdrop-filter: blur(8px) !important;
+          -webkit-backdrop-filter: blur(8px) !important;
+          box-shadow: 0 2px 12px rgba(0,0,0,.4) !important;
+        }
+
+        /* 9. Strip theme-dropdown blur (dropdown rarely visible on mobile anyway) */
+        .theme-dropdown {
+          backdrop-filter: none !important;
+          -webkit-backdrop-filter: none !important;
+          background: var(--s1) !important;
+        }
+
+        /* 10. Flatten text-shadows on score displays — saves compositor layers */
+        .csb-big-score, .hsc-big-score {
+          text-shadow: 0 2px 6px rgba(0,0,0,.8) !important;
+        }
       }
 
       /* Touch-device specific (catches phones in landscape too) */
@@ -12417,9 +12765,11 @@
 
         /* GPU-promote the score bar so it doesn't repaint on every data update */
         .cricket-score-bar { transform: translateZ(0); }
+        /* Kill team-zone transition on touch — prevents banner from animating on tab switch */
+        .csb-team-zone { transition: none !important; }
 
         /* Momentum scroll on key containers */
-        .stats-grid, .history-modal, .msv, #tab-body {
+        .stats-grid, .history-modal, .msv, #tab-body, .subs-list, .pool-chips {
           -webkit-overflow-scrolling: touch;
           overscroll-behavior: contain;
         }
@@ -12631,20 +12981,18 @@
           0 16px 48px rgba(0,0,0,0.6);
       }
 
-      /* ── 4. Score numbers — larger, sharper, broadcast feel ── */
+      /* ── 4. Score numbers — team-color, broadcast feel ── */
       .csb-big-score {
-        font-size: clamp(34px, 7vw, 46px);
-        letter-spacing: 1px;
-        background: linear-gradient(135deg, #ffffff 0%, #93c5fd 60%, #60a5fa 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        /* No font-size override — inherits clamp(42px) from main rule */
+        /* No gradient clip — team color handled by color-mix in main rule */
+        background: none;
+        -webkit-background-clip: unset;
+        -webkit-text-fill-color: unset;
+        background-clip: unset;
       }
 
       .csb-overs {
-        font-size: 12px;
-        letter-spacing: 0.5px;
-        opacity: 0.7;
+        /* No override — inherits 15px/700 from main rule */
       }
 
       .csb-context-bar {
@@ -13044,14 +13392,6 @@
         .pv2-row    { gap: 6px; }
       }
 
-      /* ── 10. Mobile — disable new orb animation ─────────── */
-      @media (max-width: 768px) {
-        body::after {
-          animation: none !important;
-          opacity: 0.07 !important;
-          transform: none !important;
-        }
-      }
       @media (prefers-reduced-motion: reduce) {
         body::after {
           animation: none !important;
@@ -13150,7 +13490,7 @@
         _scInterval = _scisMob() ? 42 : 0;
         _scInit();
         _scInitParts();
-      });
+      }, { passive: true });
       document.addEventListener('visibilitychange', function(){
         _spaused = document.hidden;
         if(!_spaused) requestAnimationFrame(_scTick);
@@ -13190,8 +13530,12 @@
           ...b,
           strike: b.name === playerName
         }));
-        await updateDoc(doc(db, "matches", mid), { currentBatsmen: batsmen });
-        toast(`Strike moved to ${playerName} 🏏`);
+        try {
+          await updateDoc(doc(db, "matches", mid), { currentBatsmen: batsmen });
+          toast(`Strike moved to ${playerName} 🏏`);
+        } catch (e) {
+          toast("Error: " + e.message, "err");
+        }
       };
       
       // Alias existing calls
