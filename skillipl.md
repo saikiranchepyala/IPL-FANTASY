@@ -1,406 +1,247 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "2.5"
+version: "2.9.7"
 project: ipl-ssmb-fantasy-league
-stack: "html, firebase, firestore, netlify, cricapi"
-updated: "2026-04-11"
+stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League App — Claude Skill
+# IPL Fantasy League v2.9 — Project Intelligence
 
-## Project Identity
-- **App**: Private IPL Fantasy League web app for ~12 friends
-- **URL**: https://dancing-chimera-1a8fb5.netlify.app
-- **Join code**: ULBF7G
-- **Stack**: Single HTML file → Firebase Firestore → Netlify
-- **Firebase project**: ipl-ssmb-fantasy-league
-- **CricAPI key**: e2ecd022-a7a9-4855-a6c3-386ea4e83786 (S plan, 2000 calls/day)
-- **Working file**: `C:\Users\shash\Downloads\ipl-fantasy-v4_render.html` (~13,000+ lines)
+## 🏗️ Core Architecture
+- **Single-File Engine**: `ipl-fantasy-v4_render.html` contains the entire app (logic, styles, views).
+- **Backend**: Firebase Firestore handles real-time sync for matches, member teams, and global stats.
+- **Data Source**: CricAPI (v1) via `match_scorecard`, `match_info`, `match_squad`, `currentMatches`, `series`, `series_info` endpoints.
+- **Security Model**: Admin-only write access to match metadata; Member-only write access to their own team picks until match lock.
 
----
+## 🚀 Automation & Logic (v2.8+)
 
-## Architecture
-Single HTML file. All JS, CSS, HTML in one file. No backend.
-Browser → Firebase Firestore (real-time onSnapshot) + CricAPI (stats)
+### Pre-Match XI Auto-Watcher
+- `startPreMatchXIWatcher()` / `stopPreMatchXIWatcher()` — background poller that auto-starts after toss.
+- Polls `match_scorecard` every **90s** for up to 40 attempts (~60 min), covering toss → first ball window.
+- **Trigger**: fires from Firestore `onSnapshot` only when `tossResult` is set in the match document (toss has happened). Before toss, zero polling. Admin does NOT need to do anything.
+- **How tossResult gets set**: admin clicks "Fetch Playing XI" once after toss → `autoFetchStats` detects toss from CricAPI → writes `tossResult` to Firestore → `onSnapshot` fires → watcher auto-starts.
+- Auto-stops when `xiReady = true`, `locked = true`, `finalized = true`, or 40 attempts reached.
+- `stopPreMatchXIWatcher()` also called explicitly on "START MATCH" click.
 
-### Firestore Structure
-```
-/meta/game          — currentMatchId, activeMatchIds[], adminPin, joinCode, cricApiKey, adminProfile, cachedIntlSeriesIds[]
-/meta/members       — { name: { pin, teamName, joinedAt } }
-/matches/{matchId}  — { label, t1, t2, t1img, t2img, matchNum, isIPL, matchType, players[], stats:{}, teams:{}, revealed, locked, finalized, liveMatchId, playerStatus:{}, fantasyEnabled, score[], matchStatus, matchResult, currentBatsmen[], currentBowler }
-/season/totals      — { memberName: { total, matches:[{matchId,label,pts}] } }
-```
+#### Critical: Feedback Loop Prevention (v2.8 fix)
+**Do NOT call `stopPreMatchXIWatcher()` from the `onSnapshot` handler or from the guard block inside `startPreMatchXIWatcher`.** Doing so creates a feedback loop:
+> `poll()` writes to Firestore → `onSnapshot` fires → `stopPreMatchXIWatcher()` clears timer → next `onSnapshot` restarts watcher with immediate `poll()` → writes to Firestore → repeat
+This caused burst API calls 4–15s apart, burning quota rapidly. The watcher's own `poll()` function is the **only** place that calls `stopPreMatchXIWatcher()` (when it detects the match has started/ended/XIconfirmed). The `startPreMatchXIWatcher` guard simply `return`s silently if conditions aren't met.
 
-### Key State Variables
-```javascript
-let session = { name, isAdmin }        // persisted to localStorage
-let localTeam = { players[], captain, vc }
-let activeMatches = {}                 // { [matchId]: { match, players, stats, teams } }
-let adminSelectedMatchId               // which match tab admin is viewing
-let memberSelectedMatchId              // which match member is viewing
-let playerStatus = {}                  // { playerName: 'playing'|'notplaying'|'impact' }
-let curRole, curSearch                 // persist across re-renders
-let _matchType = 'ipl'                 // 'ipl'|'international'|'domestic'
-```
+### Playing XI Detection — Two-Path System
+- **Path A** (primary): reads `scData.data?.players[].status === "playing"` — works during/post-match.
+- **Path B** (fallback): when Path A yields < 11 starters, reads `scData.data?.scorecard[].batting` and `.bowling` — CricAPI pre-populates these with the Playing XI announcement (0 runs/0 balls) right after toss. **This is the path that actually works pre-match.** Same approach as the confirmed-working JSON-paste parser.
+- `xiReady` flag set in Firestore only when 22+ players confirmed (both teams).
+- "Fetch Playing XI" button still exists for manual trigger; runs retry loop (20× at 20s).
 
-### Key Functions
-- `getActiveMid()` — returns admin or member selected match ID
-- `getMatch(mid)` / `getTeams(mid)` / `getStats(mid)` / `getPlayers(mid)` — read from activeMatches
-- `syncDerivedState()` — syncs currentMatch, matchPlayers, playerStats, allTeams from activeMatches
-- `showScreen(n)` — router: loading/login/join/member/admin
-- `refreshView()` — called by onSnapshot listeners
-- `reRender()` — member picker re-render, preserves scroll position via window.scrollY
-- `calcPoints(s)` — points calculator
-- `memberMatchTotal(team, stats)` — total pts for a member
-- `autoFetchStats(showFeedback)` — polls CricAPI scorecard, writes to Firestore
-- `startAR(secs)` / `stopAR()` — auto-refresh interval, fires autoFetchStats immediately on start
-- `robustMatch(raw)` — fuzzy name matching: exact → contains → initials+last → last name
+### API Leak — Member-Triggered Calls (v2.8 fix)
+- `renderStatsGrid` had a "RETRY NOW" button (`onclick="window.autoFetchStats(true)"`) visible to all members when `fantasyEnabled === false` (pre-match state). With 25 members across multiple pre-match matches, any click fired a real `match_scorecard` API call. Produced irregular gaps (1–5 min) in logs — the human-click pattern.
+- **Fix**: Button removed entirely from member view. Informational text stays; `autoFetchStats` is admin-only.
 
----
+### API Leak — Post-Match Poller
+- **Before**: poller kept running after `matchEnded = true` by design ("keep polling until admin finalizes"). Burned quota indefinitely if admin forgot to finalize.
+- **After**: `stopAR()` fires automatically the moment `matchEnded = true` is detected in `autoFetchStats`. Final stats committed first, then poller stops. Toast: `🏁 Match concluded — final stats saved. Click 'Finalize & Save' when ready.`
+- `matchEnded: true` now also written to Firestore via the **main scorecard path** (was previously only written in the `match_info` fallback path).
 
-## Match Types
-- **🏏 IPL**: strict `indian premier league` filter, max 4 overseas, role limits apply
-- **🌍 International**: bilateral/ICC, no overseas cap, no role limits
-- **🏟️ Domestic**: Plunket Shield/Ranji etc, no caps
+### Zero-Touch Playing XI (v2.6 — unchanged)
+- 4-tier name resolution (Exact → Contains → Initials → Last Name) maps CricAPI names to internal pool names.
+- Impact Sub detection: automatic status flip from `substitute` → `playing` on entry.
 
----
+## 🏟️ Admin Flow (Match Day)
+1. **Before match day**: Create match, fill Label + Team 1/2, click "Find IPL Matches" → select → `liveMatchId` auto-fills → player pool loads (~51 players).
+2. **After toss (~30 min before first ball)**: Click **"Fetch Playing XI"** once. This detects the toss, writes `tossResult` to Firestore, and auto-starts the 90s XI watcher. You'll get `✅ Playing XI auto-detected for both teams!` toast — no further action needed.
+3. **First ball**: Click **START MATCH** — locks picks, reveals leaderboard, starts live stats poller.
+4. **Match ends**: Poller auto-stops when `matchEnded = true` detected. Toast prompts to finalize.
+5. **After match**: Click **Finalize & Save** — locks points, updates season table, saves to history.
 
-## Admin Flow
-1. Find & Select Match → CricAPI `match_squad` auto-loads players + t1img/t2img flags
-2. Members pick teams (open phase) — editable freely
-3. **🥁 Toss Done** → revealed:true, auto-fetches playing XI from `match_info`, marks 🟢🔴🔵
-4. Members can still edit until lock
-5. **🔒 Lock Teams** → locked:true, team editor closes for all members
-6. **Start Match** button → sets revealed:true + locked:true, starts auto-refresh
-7. Auto-fetch scorecard every N mins from `match_scorecard` (IPL only)
-8. **✅ Finalize** → saves to season/totals, sets finalized:true
+## 📡 CricAPI Endpoints Used
+| Endpoint | When called | Purpose |
+|---|---|---|
+| `currentMatches` | Admin "Find IPL Matches" + smoke test | Discover live/upcoming match IDs |
+| `series` | Admin series search | Search by series name |
+| `series_info` | Admin series search | Full match list for a series |
+| `match_info` | "Load Players" button | Team info + player roles |
+| `match_squad` | Fallback if `match_info.teamInfo` empty | Raw squad names |
+| `match_scorecard` | `autoFetchStats()` — every poll cycle | Live stats, toss, XI, score — primary endpoint |
+| `match_info` (2nd) | Inside `autoFetchStats`, when scorecard returns failure | Score + status + XI fallback (no batting/bowling stats) |
 
----
+## ⚡ Booster System (v2.9)
 
-## Member Flow
-1. Login with name + 4-digit PIN (session saved to localStorage)
-2. Select match tab (if multiple active)
-3. Pick 11 players within 100CR budget, set C (2×) and VC (1.5×)
-4. Save Team — re-saveable until locked
-5. After toss → Live Scores shows all teams immediately
-6. After finalize → history viewable from Season Table
+### Rules
+- **1 booster per match** — team doc holds a single `booster` object; dock shows Remove/Change when one is active.
+- **League stage only** — `isPlayoffMatch(match)` checks label for: `playoff`, `qualifier`, `eliminator`, `final`, `semi-final`, `q1`, `q2`, `el.`. Dock shows greyed "not available" message; overlay blocked with toast.
 
----
+### Season Inventory (per member)
+Stored in `meta/members[name].boosters`: `{ triple: 2, double: 3, team: 2 }`.
+- **Triple (3×)**: 2 per season — multiplies the entire match total by 3×.
+- **Double (2×)**: 3 per season — multiplies the entire match total by 2×.
+- **Team (2×)**: 2 per season — multiplies every player from a chosen IPL team in your XI by 2×.
+- Inventory initialized when member joins or admin saves profile. Existing members default to full inventory if `boosters` field is absent.
 
-## Rules & Constraints
-- **Budget**: 100CR per team
-- **Max per IPL team**: 6 players
-- **Max overseas (IPL only)**: 4
-- **Role limits (IPL only)**:
-  - WK: min 1, max 4
-  - BAT: min 3, max 6
-  - AR: min 2, max 4
-  - BOWL: min 3, max 6
+### Points Calculation Order
+1. Per-player: `calcPoints(stats)` → Captain (2×) / VC (1.5×).
+2. **Team booster** (per-player): if player's `resolveTeamKey(team)` === `booster.target`, ×2. Applied inside the reduce.
+3. **Triple/Double** (whole-match): after the full reduce, multiply the total by ×3 or ×2. No target needed.
+- Example: 400 base pts + Triple = 1200 pts. Bridges the season leaderboard gap.
+- `bstTotalBadge(booster, isFinalized)` — returns badge HTML for triple/double shown on lb-card score.
+- `bstChipForPlayer(booster, playerName, pTeamKey, isFinalized)` — only for team booster, shown on player chips.
 
----
+### Per-Match Booster Data
+Saved in `matches/{mid}/teams/{name}.booster`: `{ type: 'triple'|'double'|'team', target: null|'SRH' }`.
+- `target` is `null` for triple/double (no player selection needed — multiplies entire total).
+- `target` is IPL team key (e.g. `'SRH'`) for team booster. Only match teams shown in picker.
+- Inventory is decremented in `meta/members` when team is saved with a new booster; refunded if booster is removed or changed.
 
-## Points System
-**Batting**
-- 1pt/run, 1pt/four, 2pts/six
-- 30+: +4, 50+: +8, 100+: +16
-- Duck (batted + 0 runs + dismissed): -2
-- SR bonus (min 10 balls): 170+:+6, 150+:+4, 130+:+2
-- SR penalty: <70:-2, <60:-4, <50:-6
+### Booster Auto-Save for Already-Submitted Teams (v2.9.3)
+**Problem**: Members who had already locked in their team applied a booster, saw a toast, but nothing was saved — they didn't know to re-press "Lock In".
+**Fix**: `applyBoosterChoice` and `removeBooster` are now `async`. For members with `submitted: true`, they immediately write to Firestore:
+1. `updateDoc` patches `matches/{mid}/teams/{name}.booster` directly.
+2. Fresh `getDoc` reads `meta/members`, adjusts inventory (refund old type if changing, deduct new type).
+3. `setDoc` writes back updated inventory.
+4. **In-memory patch**: `activeMatches[activeMid].teams[name].booster` is updated immediately so a subsequent lock-in sees `prevBooster === newBooster` → no double inventory charge.
+- If team not yet submitted, booster is staged to `localTeam.booster` only. Toast: "Booster staged — lock in your team to save it."
+- `finalizeMatch` always reads fresh Firestore data — unaffected by this change.
 
-**Bowling**
-- 25pts/wicket
-- 3wkts:+4, 4wkts:+8, 5wkts:+16
-- LBW/Bowled: +8 each
-- Maiden: +8
-- Economy bonus (min 2 overs): <5:+6, <6:+4, <7:+2
-- Economy penalty: >8:-2, >9:-4, >10:-6
+### Privacy / Reveal System
+- **Before match starts** (not locked): booster is completely hidden from other members. On your own team card, a "⚡ Booster Active" pill confirms it is set but shows no type/target.
+- **After admin clicks START MATCH** (`locked: true`): full booster type and target immediately revealed to everyone — badge on lb-card name row, card border glow, and player chip badges.
+- There is **no "secret while live" phase** — reveal happens at lock, not finalization.
+- Your OWN booster: `renderMyTeamCard` always passes `true` to `bstChipForPlayer` (owner always sees own booster in full). Do NOT revert these to `match.finalized`.
 
-**Fielding**
-- Catch: +8, 3+ catches: +4 bonus
-- Run out direct: +12, indirect: +6
-- Stumping: +12
+### UI Components
+- **Booster Dock** (`renderBoosterDock`): glass card in the XI builder (only when XI is full, before lock). Shows inventory chips (TRIPLE/DOUBLE/TEAM) → tap to open overlay. Active booster shows with Remove/Change buttons.
+- **Booster Overlay** (`openBoosterOverlay`): bottom sheet with 3 type buttons + target picker. Player list for triple/double; 10 IPL team keys for team booster. "APPLY" stages it locally; booster is only committed when "LOCK IN MY TEAM" is clicked.
+- **Leaderboard card highlights** (live match, `match.locked`): `bstCardClass` adds `.lb-bst-triple/.lb-bst-double/.lb-bst-team` to the lb-card for a colored left-border glow. `bstPill` renders a `bst-live-pill` badge in the name row (next to team name) showing type + target. Score badge (`.lb-score .bst-reveal-badge`) is 11px for visibility.
+- **Key functions**: `getBoosterInventory(name)`, `renderBoosterDock(match, team)`, `bstChipForPlayer(booster, playerName, pTeamKey, isFinalized)`, `_bstSheetInner()`, `_refreshBoosterDock()`.
+- **Window globals**: `window.openBoosterOverlay(preType?)`, `window.removeBooster()`, `window.bstSelectType(type)`, `window.bstSelectTarget(target)`, `window.applyBoosterChoice()`.
 
-**Bonus**
-- Playing XI: +4 (isImpact sub: +2)
-- Captain: 2× total points
-- Vice-Captain: 1.5× total points
-- Starting team total (9×4 + VC×4×1.5 + C×4×2) = **50 pts**
+### `memberMatchTotal` Signature Change
+Now takes optional `playersList` arg: `memberMatchTotal(team, stats, playersList?)`.
+- Falls back to global `matchPlayers` if not provided (backward compat for callers without a match context).
+- Both finalize paths (`finalizeMatch` and `abandonMatch`) now pass `freshMatch.players` explicitly.
+- Admin standings calculation (line ~3651) passes `getPlayers(activeMid)` explicitly — without this, team booster points are wrong when admin has multiple matches loaded and `matchPlayers` global is stale.
 
----
+## 📏 Points System (Full — matches calcPoints() in code)
 
-## autoFetchStats — Critical Behavior
-- Polls `/v1/match_scorecard`
-- **`anyBallBowled` guard**: if `matchStarted:false` AND no batsman has `b > 0`, returns early — prevents pre-match processing
-- **Per-entry 0-ball guard**: skips batting entries where `balls=0 && runs=0 && !dismissed` — prevents ghost stats for pre-populated lineup entries
-- **`playingXI: true`** only granted when player actually bats/bowls/fields OR admin sets status dropdown to Playing
-- **Lineup poller** (`startAutomatedFetch`) sets `stats.${p.name}.playingXI = isStarter` for all announced XI at toss time — this creates the 50pt base
-- **Self-heal block REMOVED** — never add back. Was `if (scData.status === "success" && activeMatchData.fantasyEnabled === false) { updateDoc(..., { fantasyEnabled: true }) }`. Caused ghost Firestore writes → onSnapshot → re-render at match start.
-- Falls back to `match_info` for score/status when scorecard unavailable
-- `fantasyEnabled` is ignored as a gate — just process what the API returns. Manual paste parser always available as fallback.
+### Base
+- +4 Starting XI; 0 for Impact Sub until they enter.
 
----
+### Batting
+- 1pt/run, +1/four, +2/six
+- Milestones: +4 (30), +8 (50), +16 (100)
+- Duck penalty: -2 (batted, scored 0, got out)
+- Strike rate bonus/penalty (min 10 balls faced):
+  - SR ≥170: +6 | SR ≥150: +4 | SR ≥130: +2
+  - SR <50: -6 | SR <60: -4 | SR <70: -2
 
-## Ghost Points Bug (PBKS vs SRH M17, April 2026) — FIXED
-**What happened**: Abhishek Sharma, Shreyas Iyer, Shivang Kumar got ghost stats at match start.
+### Bowling
+- **25 pts/wicket** (not 20)
+- +4 (3-fer), +8 (4-fer), +16 (5-fer)
+- +8/Maiden
+- +8 per LBW or Bowled dismissal
+- Economy rate bonus/penalty (min 2 overs bowled):
+  - ER <5: +6 | ER <6: +4 | ER <7: +2
+  - ER >10: -6 | ER >9: -4 | ER >8: -2
 
-**Root cause**:
-1. Match was selected when CricAPI had `fantasyEnabled:false` → stored in Firestore
-2. Admin revealed teams → `startAR()` → `autoFetchStats()` fires immediately
-3. Self-heal block detected `fantasyEnabled:false` in Firestore but scorecard returned success → wrote `fantasyEnabled:true` to Firestore → onSnapshot triggered re-render
-4. Scorecard processed with no 0-ball guard → CricAPI's pre-populated batting array (all 11 players shown as `0* 0b`) → `batted:true` written for non-batting players
+### Fielding
+- +8/catch, +4 bonus for 3+ catches in a match
+- +12/stumping, +12/direct run-out, +6/indirect run-out
 
-**Fix**: Removed self-heal block entirely. Added `anyBallBowled` guard. Added per-entry 0-ball skip.
+### Multipliers
+- Captain: 2× | Vice Captain: 1.5×
 
----
+## 🧬 Data Sync Integrity (v2.9.6 — Fixes for MI vs PBKS Crisis)
 
-## CricAPI Endpoints Used
-```
-/v1/currentMatches   — live + recent (48hr window, cache:1 issue, retry 1-2 mins)
-/v1/series_info      — full fixture list (use max 2-3x/day)
-/v1/series           — search series by name
-/v1/match_squad      — full squad (works pre-match)
-/v1/match_info       — toss details, playing XI (used at reveal)
-/v1/match_scorecard  — live innings data (IPL: works when fantasyEnabled:true)
-```
+### 1. Batting vs Bowling Field Isolation
+**Problem**: Both batting (Runs) and bowling (Runs Conceded) often use the key `r` or `runs` in API responses. In `autoFetchStats`, the bowling loop was overwriting the batting loop, causing a batter's runs (e.g., 19) to be misinterpreted as bowling overs (19.0), leading to massive ghost points.
+**Fix**: 
+- **Partitioned Fields**: Batting stats are now saved in Firestore using explicit prefixes: `bat_runs`, `bat_balls`, `bat_4s`, `bat_6s`, `bat_notOut`. 
+- **Resilient Calculator**: `calcPoints()` was updated to prefer these prefixed fields (`s.bat_runs ?? s.runs`) while maintaining backward compatibility for legacy data.
+- **Automatic Cleansing**: `autoFetchStats`, `parseScorecardText`, and `parseJsonScorecard` now explicitly nullify legacy fields (`runs`, `balls`, etc.) when saving, permanently clearing previous corruption from the match document.
 
-### API Behaviour
-- `fantasyEnabled` is an indicator, not a gate — app ignores it now
-- IPL: flips to true on match day when data flow starts (can take a few balls)
-- International: inconsistent coverage per match
-- `currentMatches` can return empty with `cache:1` — retry after 1-2 mins
-- Series IDs cached in Firebase (`cachedIntlSeriesIds`) to survive 48hr window
+### 2. Ultra-Strict Name Mapping (Identity Theft Fix)
+**Problem**: The `robustMatch` fuzzy matcher was too aggressive, accidentally mapping **Arshdeep Singh's** points (92) onto **Shreyas Iyer**. It was matching common substrings (like "Singh") or noise words (like "de" in "de Kock") to incorrect players.
+**Fix**:
+- **Suffix Stripping**: Automatically removes `(c)`, `(wk)`, `(sub)`, `(impact)`, `batting`, `not out` before matching.
+- **Meaningful Word Check**: Skips noise words (length ≤ 2). Requires **every** meaningful word in the API name to match a word in the pool name.
+- **Exact Single-Word Guard**: If the API provides only one meaningful word, it must be an exact match (prevents generic surname collisions).
+- **Parity**: This logic is now identical across `autoFetchStats`, `parseScorecardText`, and `parseJsonScorecard`.
 
-### Known Series IDs
-```
-IPL 2026:            87c62aac-bc3c-4738-ab93-19da0690488f
-NZ vs SA 2026:       30845b53-91bc-4dbe-9e91-01319213e61f
-NZ Women vs SA Women:aad7eded-4b56-498f-aae1-04cf4b839fc0
-```
+### 3. Hardened Scorecard Text Parser (Captain/All-Rounder Fix)
+**Problem**: When pasting manual scorecards, the parser misidentified Captains (who have `(c)` in their bowling row) as batting rows, skipping their bowling stats entirely.
+**Fix**:
+- **Numeric Fingerprint**: Uses numeric group counts to distinguish roles. Batting lines (R, B, 4s, 6s, SR) = **5 numbers**. Bowling lines (O, M, R, W, NB, WD) = **6 numbers**.
+- **Refined Keyword Guard**: Specifically looks for the `"c [Fielder] b [Bowler]"` pattern for dismissals. Safely ignores `(c)` and `(wk)` player titles so all-rounders have both rows parsed correctly.
 
-### IPL 2026 Match IDs
-```
-RCB vs SRH (M1):   55fe0f15-6eb0-4ad5-835b-5564be4f6a21
-MI vs KKR (M2):    e02475c1-8f9a-4915-a9e8-d4dbc3441c96
-RR vs CSK (M3):    d788e9f9-99bf-4650-a035-92a7e21b3d08
-PBKS vs GT (M4):   11ff7db9-9c71-464e-afcb-5b03e4fa4b0a
-LSG vs DC (M5):    ae676d7c-3082-489c-96c5-5620f393c900
-KKR vs SRH (M6):   fd010e39-2255-4460-b0e0-962a26b67b70
-CSK vs PBKS (M7):  96d2aa6b-ea40-4da4-b4cf-eb996de24ef7
-DC vs MI (M8):     736f3e02-212a-49bc-8b3b-08a106312702
-GT vs RR (M9):     ea4d01bf-bf47-4f7d-a4f8-32eade678141
-SRH vs LSG (M10):  e43dd29e-c60e-40c9-a6c4-6c1bd69dd671
-RCB vs CSK (M11):  e92727d0-61fc-4c6f-82ed-cde4789745a2
-KKR vs PBKS (M12): adeebb28-bc39-439b-99ed-2daef5106232
-RR vs MI (M13):    4f617f5e-c635-4989-b135-5430dc73c5d7
-DC vs GT (M14):    12496498-8526-46d9-a053-da2ba8d047e1
-KKR vs LSG (M15):  c78dcc8a-67cf-460a-8f2b-8f16d3891682
-RR vs RCB (M16):   3ec1f721-7f79-49e3-bbc1-69e88b9cf4a3 (Fantasy: False)
-PBKS vs SRH (M17): a4cd9851-d79a-42b6-8a4b-b35cbb9f9f0a
-CSK vs DC (M18):   204afd0a-026a-41f4-afda-653030a84e46
-LSG vs GT (M19):   36d875e2-3333-4fab-ba4d-4f89fb4d7055
-MI vs RCB (M20):   11d553de-3b2a-4e58-9abd-4bb7d575595e
-```
+### 4. Safety Guards & Debugging
+- **Overs Guard**: `toRealOvers()` now includes a hard limit for T20. Any value > 10.0 (e.g., a misinterpreted batting score of 35) is reset to 0.0.
+- **Playoff Guard**: `applyBoosterChoice` now has an explicit code-level guard using `isPlayoffMatch(match)` to prevent booster usage during Finals/Qualifiers.
+- **Console Exposure**: Key state variables (`activeMatches`, `currentMatchId`, etc.) and helper functions are now exposed to `window` for instant console debugging.
+- **Resilient Scorebar**: Fallbacks to `scorecard` array if root `score` object is missing from CricAPI.
 
----
+### 5. CricAPI Multi-Team Inning Label Attribution (v2.9.7 — GT vs KKR Swap Fix)
+**Problem**: CricAPI's `score[].inning` field is NOT a clean single-team label. It can return:
+- Lowercase single-team: `"kolkata knight riders Inning 1"`
+- **Multi-team concatenation**: `"Gujarat Titans,Kolkata Knight Riders Inning 1"` (the FIRST comma-segment is the batting team; the second is the bowling team).
+- Both innings in a T20 may be labeled `"Inning 1"` (not `Inning 1` / `Inning 2` as intuition suggests). Do NOT use the trailing number as a disambiguator.
 
-## IPL Team Colors
-```javascript
-const IPL_TEAM_COLORS = {
-  'RCB':  { primary:'#cc0000', secondary:'#f59e0b' },
-  'MI':   { primary:'#004ba0', secondary:'#00d4ff' },
-  'CSK':  { primary:'#f5a623', secondary:'#1a1a2e' },
-  'KKR':  { primary:'#3a0ca3', secondary:'#f59e0b' },
-  'SRH':  { primary:'#ff6b00', secondary:'#1a1a2e' },
-  'RR':   { primary:'#ff69b4', secondary:'#1e3a5f' },
-  'DC':   { primary:'#0066cc', secondary:'#cc0000' },
-  'PBKS': { primary:'#cc0000', secondary:'#c0c0c0' },
-  'LSG':  { primary:'#00bfff', secondary:'#f59e0b' },
-  'GT':   { primary:'#1c4a9f', secondary:'#f59e0b' },
-};
+When `resolveTeamKey` ran word/substring checks on the full combined string, `KKR`/`KOLKATA` was checked before `GT`/`GUJARAT`, so the GT innings row was mis-attributed to KKR. The `scoreByTeam` map then had KKR overwriting itself with GT's score, and the unclaimed-fallback in `attributeScores` handed the leftover row (KKR's actual innings) to GT — producing **fully swapped scores** across the live scorebar and sticky score pill.
+
+**Fix**: `resolveTeamKey` (first lines of the function, ~line 140) now splits on `[,&/]` or ` and ` **FIRST** and runs all subsequent word/substring checks against only the first segment. Single-team names are unaffected (split is a no-op). Multi-team labels resolve to the batting team correctly.
+
+**Never do**:
+- Do NOT reorder the word-check / substring-check blocks inside `resolveTeamKey` to "prefer" a team — ordering can't win against combined strings, and any re-order risks collateral regressions with other substring collisions.
+- Do NOT remove the first-segment split — it is the only correct way to handle the multi-team label format. Upstream CricAPI behavior is not negotiable.
+- Do NOT try to attribute scores purely by positional index (`scores[0]` → t1, `scores[1]` → t2). CricAPI orders `score[]` by **batting order**, not by t1/t2 order. Positional attribution will randomly swap the batting team's runs onto the bowling team's zone whenever t1 is the 2nd-innings team.
+
+**Downstream helpers that depend on this working correctly** — do not bypass them:
+- `resolveInningKey(inningRaw, match)` — the canonical inning-to-team-key resolver. Uses `resolveTeamKey` + t1/t2 substring + word-by-word fallback.
+- `attributeScores(match, scores)` — builds the `{ teamKey: scoreEntry }` map used by `renderScoreBar` and the score pill. Includes unclaimed-fallback (if one team resolves, the other score must be the other team) and status-based anchor (`"<team> need N runs"` → batting team).
+- `renderScoreBar(match)` — the live scorebar. Must call `attributeScores`; must NOT fall back to positional `scores[idx]` for live matches.
+- `renderScorePill()` — sticky top pill. Same attribution rules.
+
+**Regression test (mandatory before shipping any change in this area)**: Paste this CricAPI payload into the JSON scorecard parser and confirm:
+- GT zone shows `181/5 (19.4)`
+- KKR zone shows `180/10 (20.0)`
+- Sticky pill shows `GT 181/5 (19.4)` vs `KKR 180/10 (20.0)` (NOT swapped)
+
+```json
+"score": [
+  { "r": 180, "w": 10, "o": 20,   "inning": "kolkata knight riders Inning 1" },
+  { "r": 181, "w": 5,  "o": 19.4, "inning": "Gujarat Titans,Kolkata Knight Riders Inning 1" }
+]
 ```
 
----
-
-## UI / Visual Design System
-- **Style**: IPL Broadcast × Glassmorphism hybrid, dark navy base
-- **Fonts**: Bebas Neue (display scores), Barlow Condensed (UI labels), Barlow (body), DM Mono (numbers)
-- **Colors**: `--bg:#040810`, `--accent:#2563ff`, `--gold:#f59e0b`
-- **16 themes** — all require opaque `--card-bg` (dark fills, not rgba(255,255,255,.09))
-  - Full list: `titanium-gold`, `electric-ahmedabad`, `plum-noir`, `midnight`, `dracula`, `github-dimmed`, `monokai-pro`, `sakura-night`, `retro-terminal`, `emerald-pitch`, `solar-flare`, `aurora-borealis`, `royal-bengal`, `volcanic-obsidian`, `deep-cosmos`, `bronze-circuit`
-  - Gate: `VALID_THEMES` array (~line 13268) — adding a theme CSS block is not enough, name must be in this array too
-  - Removed: `cyber-marine`, `stellar-glass`, `pearl-light`, `sand-court` (eye strain)
-- **Aurora background**: radial gradients + aura blobs (`.aura-blob { filter: blur(60px) }`) — stripped on mobile
-- **Glass**: `backdrop-filter:blur(20px)` on sticky nav/score-pill only; stripped everywhere else on mobile
-
-### Score Bar (`.csb-*`) — Live match widget
-- Two team zones side by side, team-color gradient background on batting team
-- Big score (`hsc-big-score`) renders in **team color** with glow via `text-shadow`
-- Current batsmen section: both shown equally (no striker/non-striker visual distinction — that feature was removed)
-- Bowler box: red left-accent strip (`border-left: 3px solid rgba(239,68,68,.5)`), figures in red
-
-### Player Stat Cards (`_buildPlayerStatCards`, `.stat-card`, `.sc-*`)
-- **Role-colored left border**: BAT=#60a5fa (blue), BOWL=#f87171 (red), AR=#fbbf24 (amber), WK=#c084fc (purple)
-- **Stats as chips** (not text lines): `.mstat-chip-bat` (blue), `.mstat-chip-bowl` (red), `.mstat-chip-field` (purple)
-- **Points display**: `.sc-pts-on` wrapper with `.sc-pts-num` (28px gradient gold) + `.sc-pts-unit` ("pts" label)
-- **Admin save handler** at line ~5263 must use `sc-pts-num` / `sc-pts-unit` format (not old `<span>${pts}</span> pts`)
-
-### Match Summary Scorecard (`.hsc-*`) — History/innings view
-- Innings block: left border in team color, big score in team color with glow
-- Batting rows: runs color-coded (`.hsc-r-warm/fifty/ton/duck`) — **no milestone badges** (★ and 💯 removed, `milestoneBadge()` returns `''`)
-- Bowling rows: 3W/5W haul badges inline, wickets column orange on haul
-- Duck rows: 60% opacity
+If the swap reappears, the split-first logic in `resolveTeamKey` has been removed or bypassed. Restore it — do not patch around it elsewhere.
 
 ---
 
-## Performance (Mobile/iOS/Android)
-### `@media (max-width: 768px)`
-- Aura blob blur removed entirely (`filter: none`) — was blur(60px), massive GPU cost
-- ALL `backdrop-filter` stripped via `*:not(.score-pill)` selector — was only stripping a named list
-- `contain: layout style` on all cards — browser skips off-screen layout
-- `overscroll-behavior: contain` on scrollable areas
+## ⚠️ Known Edge Cases & Critical Rules
 
-### `@media (hover:none) and (pointer:coarse)` — touch devices
-- Global `-webkit-tap-highlight-color: transparent`
-- Button/tab transitions cut to 80ms
-- Gradient text (`-webkit-text-fill-color: transparent`) disabled — forces GPU layer promotion
-- Score bar gets `transform: translateZ(0)` for own compositor layer
-- `overscroll-behavior: contain` + `-webkit-overflow-scrolling: touch` on scroll containers
-
-### JS
-- Stat card stagger: `15ms × i, max 120ms` (was 25ms/300ms)
-- Card entrance animation: 180ms (was 250ms), translateY 4px (was 6px)
-- `overscroll-behavior: contain` on `.stats-grid`
-- `triggerCountUp` stagger: 30ms if >8 items, 50ms otherwise; 600ms animation per counter
-- `_buildPlayerStatCards(animate: false)` — history view emits final values directly, no `data-count-up` attrs; prevents 20+ simultaneous RAF loops freezing Android
-
-### Cross-Platform Mobile Optimizations (v2.4 audit)
-**CSS `@media (max-width: 768px)` additions:**
-- `livePulse`, `playingPulse`, `neonPulse`, `impactPulse` animations explicitly killed on elements that use them (`.sp-badge-live`, `[class*="playing-badge"]`, `.pv2-striker-dot`, `.pv2-bowler-dot`, `[style*="livePulse"]` etc.) — these animate box-shadow on every player card
-- `[style*="animation"] { animation-iteration-count: 1 !important }` — catches inline-style animations that override class-level kills
-- `.score-pill` blur reduced 16px → 8px on mobile — sticky + full backdrop-filter causes iOS scroll stutter
-- `.theme-dropdown` backdrop-filter stripped + opaque fallback background
-- Modal/overlay box-shadows flattened: `0 4px 16px rgba(0,0,0,.5)`
-- `.csb-big-score`, `.hsc-big-score` text-shadows flattened to `0 1px 3px rgba(0,0,0,.5)`
-- `.subs-list` added to `overscroll-behavior: contain` + `-webkit-overflow-scrolling: touch`
-- `.pool-chips` added to touch scroll rules
-- Duplicate `@media (max-width: 768px)` block (was at bottom of file) removed
-
-**JS fixes:**
-- `window.addEventListener('resize', ...)` for stadium canvas made `{ passive: true }` — non-passive listeners can block scroll
-- `.topnav` `will-change: transform` removed — `will-change: transform` on a `position: sticky` element silently breaks stickiness on iOS Safari (creates new stacking context that interferes with sticky tracking)
-
-### Admin Tab Bar (Mobile Fix)
-- Root cause of tab inconsistency: overflow-x scroll on `.view-tabs` conflicted with tap events on Android
-- Fix: `@media (max-width: 600px)` makes `.view-tabs { flex-wrap: wrap; overflow-x: visible }` — all 5 tabs render in 2 rows, no scrolling needed
-- `.vtab` base style has `touch-action: manipulation; -webkit-tap-highlight-color: transparent` — eliminates 300ms delay
-- `switchAdminTab` has `_switchAdminTabBusy` debounce guard (400ms) — prevents double-tap or scroll-then-tap firing two re-renders
-- `.vtab.active { animation: none !important }` on mobile — kills glowPulse repaint during touch
-
-### Tab Switch Scroll Fix
-- `window.switchTab` now calls `window.scrollTo({ top: 0, behavior: "instant" })` before re-rendering — prevents viewport jumping when switching between My Team → Live Scores on Android
-- `.csb-team-zone` transition narrowed from `transition: all 0.3s ease` → `transition: border-color 0.3s ease, background 0.3s ease` — `transition: all` was animating height/position from browser defaults on first DOM insertion causing the live banner to visibly move
-- Touch device override: `.csb-team-zone { transition: none !important }` under `@media (hover:none) and (pointer:coarse)`
-
-### parseJsonScorecard — Manual JSON Paste Fallback
-- Implemented `window.parseJsonScorecard()` (was missing — button existed but function was undefined)
-- Button in CricAPI card: "Parse JSON Scorecard" → reads from `#pasteJsonScorecardBox` textarea
-- Accepts full API envelope (`{ data: { ... } }`) or bare payload
-- Same parsing logic as `autoFetchStats`: `robustMatch`/`nl` lookup, batting/bowling/catching accumulation, 0-ball guard
-- Writes `score[]`, `matchStatus`, and per-player stats to Firestore on success
-- Clears textarea and refreshes stats grid after successful write
-- Use when: auto-fetch lags, `fantasyEnabled:false`, or CricAPI is slow to update
-
-### finalizeMatch Rewrite (Consistency Fix)
-- Fresh Firestore fetch: `Promise.all([getDoc(matches/activeMid), getDoc(season/totals)])` replaces stale `activeMatches` cache — eliminates stale-data writes
-- `skipNextRefresh = true` set before writes, released after — blocks intermediate `onSnapshot` re-renders while writes are in-flight
-- Double-finalize guard uses fresh Firestore data (not in-memory) — `if (freshMatch.finalized && !confirm(...))` 
-- `adminSelectedMatchId = remaining[0] || null` reset synchronously after writes — next `refreshView()` shows clean state
-- Catch block includes `skipNextRefresh = false` — ensures `onSnapshot` refreshes are not permanently blocked if finalization throws an error
-
----
-
-## Critical Bug Fixes — NEVER REVERT THESE
-1. `renderMyTeamCard(myTeam, viewMatch)` — not currentMatch
-2. `bindAvailSelects()` called on stats tab initial load
-3. `noMatch` uses `activeMid` not `currentMatchId`
-4. `renderLiveTab` uses `liveMatch/liveMid` not currentMatch
-5. C/VC dropdowns call `reRender()` — not `getElementById('xiChips').innerHTML`
-6. `nukeEverything` wipes `activeMatchIds:[]`, `cachedIntlSeriesIds:[]`, calls `deleteDoc`
-7. `--cyan` replaced with explicit `#00d4ff`
-8. Role limits guarded by `isIPLMatch()` — no role caps for international
-9. FOREIGN tag guarded by `isIPLMatch()` — no tag for international
-10. `handleLockTeam` saves to `saveMid = memberSelectedMatchId || currentMatchId`
-11. `memberSelectedMatchId` set on login, saved to localStorage
-12. `playerStatus = {}` cleared on match switch (both admin and member)
-13. `removeActiveMatch` validates mid exists before removing
-14. `autoFetchStats` uses only `activeMatchData.liveMatchId` — no currentMatch fallback
-15. `renderAdminStats` uses `getActiveMid()` not `currentMatchId`
-16. `bindCards` and role summary both use local `pool` not global `matchPlayers`
-17. `reRender()` preserves scroll via `window.scrollY`
-18. `matchType` saved in `renderMatchList` setDoc
-19. Session persisted to localStorage, cleared on logout
-20. `bindMember` checks `_viewMid/_viewMatch` not `currentMatch` for lock state
-21. Auto-lock fires on first scorecard hit
-22. Super over stats accumulated not overwritten
-23. `altnames[]` indexed in player name lookup
-24. `.trim()` on all raw API name extractions
-25. Exact name match before fuzzy in playing XI detection
-26. Double-finalize guard — hard stop if `match.finalized` already true
-27. Shared surnames (Singh/Sharma) use exact-only matching for playing XI dots
-28. Role mapRole() covers all bowling style strings: "Left-arm orthodox", "Leg Break" etc → BOWL
-29. **Self-heal block removed** — never add `if (scData.status==="success" && fantasyEnabled===false) updateDoc(fantasyEnabled:true)` back
-30. **0-ball batting guard** — always skip entries with `balls=0 && runs=0 && !dismissed`
-31. **`anyBallBowled` guard** — don't process scorecard if no batsman has `b > 0` and `matchStarted:false`
-32. **Admin pts save handler** — must write `<span class="sc-pts-num">${pts}</span><span class="sc-pts-unit">pts</span>` not old `<span>${pts}</span> pts`
-33. **Admin tab mobile** — `_switchAdminTabBusy` guard must stay in `switchAdminTab`; removing it re-introduces double-render bug on Android tap
-34. **VALID_THEMES** — every theme CSS block must have a matching entry in the `VALID_THEMES` array; `setDashboardTheme` silently bails if name not in list
-35. **`milestoneBadge` removed** — function now returns `''`; do not restore ★/💯 badges, they were confusing on scorecards
-36. **Admin match tab is 2-col** — uses `.admin-2col` (320px + 1fr); do not add a third `.acol` back; Submissions card lives inside COL2 after the CricAPI card
-37. **Submissions sort order** — `ranked` sorted submitted-first then alphabetical; rank medals (🥇🥈🥉) removed; do not restore points-based sort here
-38. **Tab switch scroll** — `window.switchTab` must call `window.scrollTo({ top: 0, behavior: "instant" })` before rendering; do not remove or change to smooth — causes Android viewport jump
-39. **`.csb-team-zone` transition** — must be `border-color 0.3s ease, background 0.3s ease` (not `all 0.3s ease`); `transition:all` animates height/position on first DOM insert causing live banner to move on mobile
-40. **`finalizeMatch` catch block** — must include `skipNextRefresh = false`; without it, any error during finalization permanently blocks all `onSnapshot` refreshes until page reload
-41. **`parseJsonScorecard` function** — defined as `window.parseJsonScorecard`; do not remove — button at line ~3586 calls it directly via `onclick`; was previously missing causing uncaught ReferenceError on click
-42. **`parseSquadList` header stripping** — when a comma-separated line has a team prefix (e.g. "LSG Impact Subs - Name1, Name2"), strip the prefix before splitting on commas; without this, first player is unmatched because the clean string includes the prefix
-43. **`nearMatch()` in `parseSquadList`** — 1-char edit-distance function catches spelling variants (Ahmad↔Ahmed, Sharman↔Sharma); do not remove — required for fuzzy squad paste matching
-44. **`addPlayerManually` skipNextRefresh guard** — `skipNextRefresh = true` must be inside a try/catch with `skipNextRefresh = false` in the catch; without it, any Firestore error permanently blocks all onSnapshot refreshes
-45. **All async write functions need try/catch** — `removePlayer`, `clearPool`, `removeActiveMatch`, `createOrUpdateMatch`, `setStrikerOverride`, `bindAvailSelects` change handler, role-change handler inside `addPlayerManually` — all must have try/catch so user sees the error toast and state is not left dangling
-46. **`abandonMatch` uses fresh Firestore fetch** — same as `finalizeMatch`: reads from `getDoc(matches/activeMid)` + `getDoc(season/totals)` inside `Promise.all`; also has `skipNextRefresh = true/false` guard; do not revert to stale `getTeams()`/`getMatch()` cache
-
----
-
-## Features Status
-### Implemented ✅
-- Multi-match tabs (admin + member)
-- 3-way match type (IPL/International/Domestic)
-- Fresh team per match (no transfers)
-- Session persistence (localStorage)
-- Playing XI auto-detection at toss
-- Auto-fetch stats + auto-lock on first scorecard hit
-- Fuzzy name matching (overseas + credits)
-- Team flags from API
-- Match history modal (Season Table → click match pill)
-- Podium animations + winner banner
-- NOT OUT (*) indicator
-- ✈ overseas in chips and XI panel
-- Availability dots with glow + impact pulse
-- nukeEverything (keeps members)
-- Admin player profile
-- Export CSV
-- Mobile responsive + performance-optimized for iOS/Android
-- Role-colored stat cards with chip-style stats
-- Live score bar with team-colored scores + bowler strip
-- Match Control panel redesigned: dot-line phase tracker, phase badge, grouped action buttons, `<details>` danger zone (`.mc-card`, `.mc-track`, `.mc-dot`, `.mc-node-*`, `.mc-lbl`)
-- Admin sections condensed: `.pool-chips` scroll-capped (148px), `.mrow`/`.aa-row` tighter padding, `#finalizedMatchesList` scroll-capped (120px)
-- 16 themes (added volcanic-obsidian, deep-cosmos, bronze-circuit)
-- **Admin match tab restructured to 2-column layout** (was 3-col): COL1=Match Setup+Control (320px), COL2=CricAPI+Players → Submissions → Leaderboard stacked; collapses to 1-col at 900px
-- **Submissions card** sits in COL2 below CricAPI, scroll-capped at 240px; sorted submitted (✓) first then pending (–) with a "PENDING" divider; rank medals removed
-
-### Removed ❌
-- Transfer system (fresh pick per match instead)
-- Bulk paste players
-- Striker/non-striker visual highlight (was unreliable)
-- Self-heal block for fantasyEnabled (caused ghost points)
-- Milestone badges on batting rows (★ 50+, 💯 100+) — confusing, removed
-- Themes: cyber-marine, stellar-glass, pearl-light, sand-court (eye strain)
+- **API Lag**: Scorecard may delay 1-2 overs; admin must click "Start Match" manually at first ball.
+- **Ghost Points**: `anyBallBowled` guard prevents pre-match stats from leaking before game starts.
+- **Impact Swaps**: Handled automatically via `match_scorecard` poller status updates.
+- **Overscroll on desktop**: `overscroll-behavior-y: none` MUST stay inside touch media query — global breaks desktop scroll.
+- **XI Watcher feedback loop**: NEVER call `stopPreMatchXIWatcher()` from `onSnapshot` handler or from the guard inside `startPreMatchXIWatcher`. Only `poll()` calls it. Violating this causes rapid-fire API calls (4–15s apart) that drain quota.
+- **Privacy Wall**: All scores hard-locked to `0 pts` until admin clicks "START MATCH" (`match.revealed: true`).
+- **Fix Ishan button**: Removed — was a one-off hardcoded fix for Ishan Kishan catches, no longer needed.
+- **RETRY NOW button**: Removed from member view in `renderStatsGrid` — was calling `autoFetchStats` on member click when `fantasyEnabled === false`. Admin-only operation has no place in member UI.
+- **bstSelectTarget selector**: Must query `.bst-target-item, .bst-team-card` (both selectors). Querying `.bst-target-item` only means team card taps never register. Fixed in v2.9.
+- **Booster reveal gate is `match.locked`, not `match.finalized`**: All reveal logic (`bstTotalBadge`, `bstChipForPlayer` in lb-card, `boosterStatusHtml` in my-team-card) uses `match.locked`. `renderMyTeamCard` passes `true` to `bstChipForPlayer` (owner always sees own booster in full). Do NOT revert these to `match.finalized`.
+- **No pulsing secret dot**: The `.lb-bst-active` pulsing dot (was shown during live match to hint a booster exists) has been removed. The full booster is revealed at lock, so there is nothing to hint at secretly. CSS class remains in the stylesheet but is unused.
+- **Points are 25pt/wkt not 20pt/wkt**: The code has always used 25. Do not change this — members' season totals are built on it.
+- **Booster inventory race condition**: Inventory read/write happens at team save time via fresh `getDoc`. If two saves fire simultaneously (unlikely with single-user sessions), the second write wins. Acceptable for a 25-member private league.
+- **`switchAdminTab` must NOT call `refreshView()`**: Rebuilding the full screen on every tab click invalidates all compositor layers simultaneously — causes Android flicker. Surgical swap of `#admin-tab-content` only.
+- **`window.scrollTo` must be desktop-only in tab switches**: Instant scroll-to-top on Android forces the Chrome address bar to reappear, collapsing the viewport height in one frame — this is the "bottom screen flicker". Always gate with `(hover: hover) and (pointer: fine)`.
+- **Admin standings `memberMatchTotal` must pass `getPlayers(activeMid)`**: Without the explicit playersList, team booster calculations fall back to global `matchPlayers` which may be stale if admin has multiple matches loaded.
+- **`contain: paint layout` must NOT be on `#admin-body`**: Creates double-promotion with `transform: translateZ(0)` — Android Chrome re-rasterises the entire paint box on every `:active` tap. Member body never had this, so member taps never flickered. Do not re-add `contain` here.
+- **`contain: paint` clips `position: absolute` children**: `contain: paint` clips absolutely-positioned children to the element's border-box. Fine for the current layout but a hidden footgun for any future overlay inside `#admin-body`.
+- **Inline onclick functions must be on `window`**: All functions called from `onclick="..."` attributes in admin tab HTML strings must be assigned to `window`. Closures in module scope are not reachable from inline handlers. The `window.admin*` wrapper block before `renderMatchList` is the canonical place.
+- **`bindAdmin` slim must be maintained**: `bindAdmin(true)` is called on every tab switch. Any non-async, non-dynamic binding added back to `bindAdmin` reintroduces the binding gap. New buttons should use inline onclick, not `bindAdmin` wiring.
+- **`#finalizeBtn`, `#nukeBtn`, `#saveAllStatsBtn` ids must stay**: These functions self-disable by `getElementById` during async operations. Even though onclick is inline, the id attributes must coexist on the same button element.
+- **`_cricFetch` returns a raw Response — always chain `.then(r => r.json())`**: Every call to `_cricFetch` must call `.json()` on the result. `autoFetchStats` previously skipped this, making all `scData.data` accesses return `undefined` silently.
+- **Toast element must stay outside `#appRoot`**: `#appRoot` has `transform: translateZ(0)` which breaks `position: fixed` for any child. The `<div id="toast">` must be a direct child of `<body>`, placed after `</div>` closing `#appRoot`. Do not move it inside any transformed ancestor.
+- **`match_scorecard` failure ≠ match not live**: CricAPI can return "match scorecard not found" while the match is actively in progress (`matchStarted: true`). This happens when `fantasyEnabled: false`. Always fall back to `match_info` for score/status rather than treating it as a hard error. Scorecard becomes available automatically — do not add retry logic that bypasses the normal poller.
+- **`resolveTeamKey` MUST split on `[,&/]` and ` and ` FIRST**: CricAPI returns multi-team inning labels like `"Gujarat Titans,Kolkata Knight Riders Inning 1"` where the first comma-segment is the batting team. Without the split, `KOLKATA` is matched before `GUJARAT` and both scorebar/pill show swapped team scores (GT vs KKR production bug). Never reorder the team checks inside `resolveTeamKey` to "prefer" a team — that doesn't fix combined strings and risks other regressions. Never attribute `scores[]` positionally for live matches; CricAPI orders by batting order, not t1/t2 order.
+- **CricAPI inning labels are unreliable**: Can be lowercase (`"kolkata knight riders Inning 1"`), combined (`"Gujarat Titans,Kolkata Knight Riders Inning 1"`), and BOTH T20 innings may be labeled `Inning 1` (do not use the trailing number to disambiguate 1st vs 2nd innings). Always route inning resolution through `resolveInningKey(inningRaw, match)` and score attribution through `attributeScores(match, scores)` — these helpers compose correctly; bypassing them reintroduces the swap bug.
