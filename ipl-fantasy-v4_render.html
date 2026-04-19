@@ -4772,6 +4772,14 @@
             <button class="btn-reveal" onclick="adminFetchXI()">${xiReady ? "🔄 Re-fetch Playing XI" : "🏏 TOSS DONE — FETCH XI"}</button>
             <button class="mc-start-btn${xiReady ? "" : " mc-start-btn-muted"}" onclick="adminStartMatch()">🚀 START MATCH</button>
             <p class="mc-hint">${xiReady ? "Locks teams · leaderboard goes live" : "Fetch Playing XI before starting"}</p>
+            ${!xiReady ? `<details style="margin-top:10px;">
+              <summary style="cursor:pointer; font-size:12px; color:var(--muted); user-select:none; list-style:none;">📋 XI not loading from API? Paste manually ▾</summary>
+              <div style="margin-top:8px;">
+                <textarea id="matchTabSquadBox" placeholder="Paste both Playing XIs — names from WhatsApp, Cricbuzz, Tribune India (comma or newline separated). Prefix line with 'Impact:' for subs." style="width:100%; height:72px; background:var(--bg); border:1px solid var(--bd); color:var(--text); padding:8px; border-radius:var(--radius); font-size:12px; font-family:monospace; resize:vertical; box-sizing:border-box;"></textarea>
+                <button class="btn-sm" onclick="parseSquadList('matchTabSquadBox')" style="margin-top:6px; width:100%; background:rgba(26,86,255,0.12); color:var(--accent); border-color:rgba(26,86,255,0.3);">Mark Playing XI</button>
+                <p class="muted" style="font-size:11px; margin-top:4px;">Fuzzy-matches names against the player pool. Sets XI ready when 22+ confirmed.</p>
+              </div>
+            </details>` : ""}
           </div>`
               : ""
           }
@@ -4963,13 +4971,13 @@
   </div>`;
       }
 
-      window.parseSquadList = async function () {
+      window.parseSquadList = async function (sourceId = "bulkSquadBox") {
         const activeMid = getActiveMid();
         if (!activeMid) {
           toast("Create a match first", "err");
           return;
         }
-        const text = document.getElementById("bulkSquadBox").value;
+        const text = document.getElementById(sourceId)?.value || "";
         if (!text.trim()) {
           toast("Paste a list of names first", "err");
           return;
@@ -5109,13 +5117,30 @@
         });
 
         if (foundCount > 0) {
+          // Set xiReady if 22+ players total are marked as "playing" (existing + this batch)
+          if (!activeMatchData?.xiReady) {
+            const nowPlaying = new Set(
+              Object.entries(activeMatchData?.playerStatus || {})
+                .filter(([, v]) => v === "playing")
+                .map(([n]) => n)
+            );
+            Object.entries(update).forEach(([k, v]) => {
+              if (!k.startsWith("playerStatus.")) return;
+              const name = k.slice("playerStatus.".length);
+              if (v === "playing") nowPlaying.add(name);
+              else nowPlaying.delete(name);
+            });
+            if (nowPlaying.size >= 22) update["xiReady"] = true;
+          }
           skipNextRefresh = true;
           await updateDoc(doc(db, "matches", activeMid), update).catch((e) => {
             skipNextRefresh = false;
             throw e;
           });
-          toast(`Bulk marked ~${foundCount} players! ⚡`);
-          document.getElementById("bulkSquadBox").value = "";
+          const xiMsg = update["xiReady"] ? " ✅ XI confirmed!" : "";
+          toast(`Bulk marked ~${foundCount} players!${xiMsg} ⚡`);
+          const srcEl = document.getElementById(sourceId);
+          if (srcEl) srcEl.value = "";
           const grid = document.getElementById("statsGrid");
           if (grid) {
             grid.innerHTML = renderStatsGrid("");
@@ -7754,7 +7779,7 @@
             clearInterval(window._xiPollTimer);
             window._xiPollTimer = null;
             toast(
-              "XI Poller timed out — use JSON paste fallback if needed",
+              "XI not loaded from API — paste names in 'XI not loading?' panel below",
               "err",
             );
           } else {

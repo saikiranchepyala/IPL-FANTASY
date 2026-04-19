@@ -255,6 +255,15 @@ Firebase will connect to your live Firestore instance, so any changes made local
 
 ## 📋 Changelog
 
+### v3.2.0 — April 18, 2026
+- Added "XI not loading from API?" paste panel in Current Match tab — paste both Playing XIs when CricAPI fails post-toss
+- Fixed `parseSquadList` to set `xiReady: true` when 22+ playing players confirmed (existing + batch counted together)
+- Impact players (prefixed "Impact:") correctly excluded from xiReady threshold
+
+### v3.1.0 — April 18, 2026
+- Fixed final-over stats freeze: grace poll pattern gives CricAPI 60s after match end to commit final scorecard
+- `_handleMatchEnd(activeMid)` stops recurring interval then fires one final poll; uses `_arGracePollMid` cancellation key
+
 ### v3.0.0 — April 18, 2026
 - Fixed admin Season Leaderboard "X Matches ▾" toggle breaking for members with apostrophes in their name
 - Full smoke test + API endpoint verification — all CricAPI endpoints confirmed live, `fantasyEnabled: true` for all IPL 2026 matches

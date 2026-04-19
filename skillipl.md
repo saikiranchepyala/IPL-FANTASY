@@ -1,12 +1,34 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.1.0"
+version: "3.2.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.1 — Project Intelligence
+# IPL Fantasy League v3.2 — Project Intelligence
+
+## 🔧 Manual XI Paste Panel + xiReady Fix (v3.2.0 — April 18, 2026)
+
+**Root cause**: When CricAPI doesn't return Playing XI data in the window between toss and first ball (Path A status field absent, Path B scorecard arrays empty), the XI poller times out with no fallback. The admin had to switch to the Player Stats tab to use "Bulk Mark Playing XI" — and even then, `xiReady` was never set to `true`, so members never saw the "Toss done" prompt.
+
+**Fixes**:
+
+1. **`parseSquadList` now sets `xiReady = true`** when total playing count reaches 22+.
+   Counts existing `activeMatchData.playerStatus` "playing" entries PLUS the current batch — so pasting both teams in two separate batches of 11 each still triggers xiReady correctly.
+   Impact players (prefixed with "Impact:") are excluded from the count and never trigger xiReady.
+
+2. **Manual XI panel added to Current Match tab** — collapsible `<details>` block ("XI not loading from API? Paste manually ▾"), only visible when `!xiReady && !locked && !finalized`.
+   Admin pastes both Playing XIs (names from WhatsApp, Cricbuzz, Tribune India) → calls `parseSquadList('matchTabSquadBox')`.
+
+3. **`parseSquadList` accepts `sourceId` parameter** (defaults to `"bulkSquadBox"` for backward compat). Current Match tab passes `'matchTabSquadBox'`.
+
+**Impact player handling** (unchanged, documented here): The `parseSquadList` protection logic prevents "impact" status from overwriting an already-playing player in the same paste. `nowPlaying` count only tracks `"playing"` status — impact subs never contribute to the 22 threshold.
+
+**Admin flow when CricAPI fails**:
+1. Click "TOSS DONE — FETCH XI" → poller runs 20 attempts
+2. If times out: expand "XI not loading from API?" panel → paste both XIs → "Mark Playing XI"
+3. `xiReady` triggers when 22 playing confirmed → members see "Toss done" prompt
 
 ## 🔧 Final-Over Stats Fix (v3.1.0 — April 19, 2026)
 
