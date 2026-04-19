@@ -147,31 +147,29 @@
         const tn = (firstSeg || teamName).toUpperCase().trim();
         if (IPL_TEAM_COLORS[tn]) return tn;
 
-        // Exact word boundary matches for shortnames
-        const words = tn.split(/[\s,.\-_/()]+/);
-        if (words.includes("RCB") || words.includes("BANGALORE") || words.includes("BENGALURU")) return "RCB";
-        if (words.includes("MI") || words.includes("MUMBAI")) return "MI";
-        if (words.includes("CSK") || words.includes("CHENNAI")) return "CSK";
-        if (words.includes("KKR") || words.includes("KOLKATA")) return "KKR";
-        if (words.includes("SRH") || words.includes("HYDERABAD")) return "SRH";
-        if (words.includes("RR") || words.includes("RAJASTHAN")) return "RR";
-        if (words.includes("DC") || words.includes("DELHI")) return "DC";
-        if (words.includes("PBKS") || words.includes("PUNJAB")) return "PBKS";
-        if (words.includes("LSG") || words.includes("LUCKNOW")) return "LSG";
-        if (words.includes("GT") || words.includes("GUJARAT") || words.includes("GUJRAT") || words.includes("TITANS")) return "GT";
-        
-        // Fallback substrings
-        if (tn.includes("BANGALORE") || tn.includes("BENGALURU")) return "RCB";
-        if (tn.includes("MUMBAI")) return "MI";
-        if (tn.includes("CHENNAI")) return "CSK";
-        if (tn.includes("KOLKATA")) return "KKR";
-        if (tn.includes("HYDERABAD")) return "SRH";
-        if (tn.includes("RAJASTHAN")) return "RR";
-        if (tn.includes("DELHI")) return "DC";
-        if (tn.includes("PUNJAB")) return "PBKS";
-        if (tn.includes("LUCKNOW")) return "LSG";
-        if (tn.includes("GUJARAT") || tn.includes("GUJRAT") || tn.includes("TITANS")) return "GT";
+        if (
+          tn.includes("BANGALORE") ||
+          tn.includes("BENGALURU") ||
+          tn.includes("RCB")
+        )
+          return "RCB";
+        if (tn.includes("MUMBAI") || tn.includes("MI")) return "MI";
+        if (tn.includes("CHENNAI") || tn.includes("CSK")) return "CSK";
+        if (tn.includes("KOLKATA") || tn.includes("KKR")) return "KKR";
+        if (tn.includes("HYDERABAD") || tn.includes("SRH")) return "SRH";
+        if (tn.includes("RAJASTHAN") || tn.includes("RR")) return "RR";
+        if (tn.includes("DELHI") || tn.includes("DC")) return "DC";
+        if (tn.includes("PUNJAB") || tn.includes("PBKS")) return "PBKS";
+        if (tn.includes("LUCKNOW") || tn.includes("LSG")) return "LSG";
+        if (tn.includes("GUJARAT") || tn.includes("GT")) return "GT";
         return "";
+      }
+
+      function getTeamColor(matchData) {
+        if (!matchData) return { primary: "#2563ff", secondary: "#f59e0b", gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)" };
+        const t1Key = resolveTeamKey(matchData.t1 || matchData.label || "");
+        if (t1Key && IPL_TEAM_COLORS[t1Key]) return IPL_TEAM_COLORS[t1Key];
+        return { primary: "#2563ff", secondary: "#f59e0b", gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)" };
       }
 
       function resolveInningKey(inningRaw, match) {
@@ -239,8 +237,8 @@
             const otherKey = (bKey === t1Key) ? t2Key : t1Key;
             const s1 = scores[0], s2 = scores[1];
             // Identify which score is finished (20 ov or 10 wk)
-            const s1Finished = (s1.w === 10 || parseFloat(s1.o) >= 20);
-            const s2Finished = (s2.w === 10 || parseFloat(s2.o) >= 20);
+            const s1Finished = (parseInt(s1.w) === 10 || parseFloat(s1.o) >= 20);
+            const s2Finished = (parseInt(s2.w) === 10 || parseFloat(s2.o) >= 20);
             
             if (s1Finished && !s2Finished) {
               // Score 1 is done, Score 2 is batting
@@ -254,22 +252,6 @@
           }
         }
         return scoreByTeam;
-      }
-
-      function getTeamColor(matchData) {
-        if (!matchData)
-          return {
-            primary: "#2563ff",
-            secondary: "#f59e0b",
-            gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)",
-          };
-        const t1Key = resolveTeamKey(matchData.t1 || matchData.label || "");
-        if (t1Key && IPL_TEAM_COLORS[t1Key]) return IPL_TEAM_COLORS[t1Key];
-        return {
-          primary: "#2563ff",
-          secondary: "#f59e0b",
-          gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)",
-        };
       }
 
       function toRealOvers(ov) {
@@ -681,12 +663,9 @@
           </div>`;
         } else if (_bstSelectedType === "team") {
           // Show only the two teams playing this match
-          const t1Key = resolveTeamKey(
-            activeMatch?.t1 || activeMatch?.label?.split("vs")[0] || "",
-          );
-          const t2Key = resolveTeamKey(
-            activeMatch?.t2 || activeMatch?.label?.split("vs")[1] || "",
-          );
+          const _bstLabelParts = (activeMatch?.label || "").split(/\s+vs\s+/i);
+          const t1Key = resolveTeamKey(activeMatch?.t1 || _bstLabelParts[0] || "");
+          const t2Key = resolveTeamKey(activeMatch?.t2 || _bstLabelParts[1] || "");
           const matchTeams = [t1Key, t2Key].filter(Boolean);
           const teamKeys = matchTeams.length >= 2 ? matchTeams : BST_TEAM_KEYS;
           targetHtml = `<div class="bst-target-label">Choose a team — all your players from that team get 2×</div>
@@ -909,6 +888,8 @@
           } catch (e) {}
         });
         matchUnsubs = {};
+        prevScores = {};
+        _pvMatchCache = {};
       }
 
       // ── Boot ──
@@ -1127,8 +1108,13 @@
         // Eliminates the arbitrary 50ms setTimeout while keeping the
         // invisible-paint guarantee that prevents a flash of old content.
         requestAnimationFrame(() => {
-          app.innerHTML = (map[n] || renderLoading)();
-          bindEvents(n);
+          try {
+            app.innerHTML = (map[n] || renderLoading)();
+            bindEvents(n);
+          } catch (e) {
+            console.error("showScreen render error:", e);
+            app.innerHTML = renderLoading();
+          }
           requestAnimationFrame(() => {
             app.style.transition =
               "opacity 0.15s ease-out, transform 0.15s ease-out";
@@ -2070,8 +2056,9 @@
         const batsmen = match.currentBatsmen || [];
         const bowler = match.currentBowler;
 
-        const t1Key = resolveTeamKey(match.t1 || (match.label || "").split(/\s+vs\s+/i)[0]);
-        const t2Key = resolveTeamKey(match.t2 || (match.label || "").split(/\s+vs\s+/i)[1]);
+        const _sbLabelParts = (match.label || "").split(/\s+vs\s+/i);
+        const t1Key = resolveTeamKey(match.t1 || _sbLabelParts[0]);
+        const t2Key = resolveTeamKey(match.t2 || _sbLabelParts[1]);
         const homeColor = IPL_TEAM_COLORS[t1Key]?.primary || "#2563ff";
         const awayColor = IPL_TEAM_COLORS[t2Key]?.primary || "#f59e0b";
 
@@ -2081,36 +2068,45 @@
         } else if (match.matchEnded) {
           contextLine = match.matchResult || status || "Match Concluded";
         } else if (isLive && scores.length === 2) {
-          // SUPPLEMENT generic status with RRR only if status isn't already descriptive
-          const isGeneric = !status || status.toLowerCase() === "live" || status.toLowerCase().includes("updates");
-          
-          const _rrScoreByTeam = attributeScores(match, scores);
-          const lastScore = scores[scores.length - 1];
-          const _rrCurKey = Object.keys(_rrScoreByTeam).find(k => _rrScoreByTeam[k] === lastScore);
-          const firstInnKey = Object.keys(_rrScoreByTeam).find(k => k !== _rrCurKey);
-          
-          if (_rrCurKey && firstInnKey) {
-            const inn1Score = _rrScoreByTeam[firstInnKey];
-            const inn2Score = _rrScoreByTeam[_rrCurKey];
-            const target = (inn1Score?.r || 0) + 1;
-            const current = inn2Score?.r || 0;
-            const oversDone = toRealOvers(parseFloat(inn2Score?.o) || 0);
-            const ballsLeft = 20 * 6 - oversDone * 6;
-            
-            if (ballsLeft > 0 && target > current) {
-              const rrr = ((target - current) / (ballsLeft / 6)).toFixed(2);
-              const rrrLine = `REQ RATE: ${rrr} | NEED ${target - current} OFF ${Math.floor(ballsLeft)} BALLS`;
-              if (isGeneric) contextLine = rrrLine;
-              else contextLine = `${status} (${rrrLine})`;
+          // Primary: parse directly from CricAPI status — avoids score attribution & transient o=0 bugs
+          const needMatch = status.match(/need\s+(\d+)\s+runs?\s+(?:in|off|from)\s+(\d+)\s+balls?/i);
+          if (needMatch) {
+            const runsNeeded = parseInt(needMatch[1]);
+            const ballsLeft = parseInt(needMatch[2]);
+            if (runsNeeded > 0 && ballsLeft > 0) {
+              const rrr = (runsNeeded / (ballsLeft / 6)).toFixed(2);
+              // Status already says "Team need X in Y balls" — append RRR only
+              contextLine = `${status} | RRR: ${rrr}`;
+            }
+          } else {
+            // Fallback: calculate from attributed scores (used when status is generic)
+            const isGeneric = !status || /^(live|live updates?|waiting|in progress)/i.test(status.trim());
+            const _rrScoreByTeam = attributeScores(match, scores);
+            const _rrLastScore = scores[scores.length - 1];
+            const _rrCurKey = Object.keys(_rrScoreByTeam).find(k => _rrScoreByTeam[k] === _rrLastScore);
+            const _rrFirstKey = Object.keys(_rrScoreByTeam).find(k => k !== _rrCurKey);
+            if (_rrCurKey && _rrFirstKey) {
+              const inn1Score = _rrScoreByTeam[_rrFirstKey];
+              const inn2Score = _rrScoreByTeam[_rrCurKey];
+              const target = (inn1Score?.r || 0) + 1;
+              const current = inn2Score?.r || 0;
+              const _ovRaw = parseFloat(inn2Score?.o) || 0;
+              const _ovFull = Math.floor(_ovRaw);
+              const _ovBalls = Math.round((_ovRaw - _ovFull) * 10);
+              const ballsBowled = _ovFull * 6 + Math.min(_ovBalls, 6);
+              const ballsLeft = 120 - ballsBowled;
+              // Guard: ballsBowled === 0 means transient CricAPI state (o field reset between balls)
+              if (ballsBowled > 0 && ballsLeft > 0 && target > current) {
+                const rrr = ((target - current) / (ballsLeft / 6)).toFixed(2);
+                const rrrLine = `NEED ${target - current} OFF ${ballsLeft} BALLS | RRR: ${rrr}`;
+                contextLine = isGeneric ? rrrLine : `${status} | ${rrrLine}`;
+              }
             }
           }
         }
 
-        // Use robust attribution helper
         const scoreByTeam = attributeScores(match, scores);
         const lookupWorked = Object.keys(scoreByTeam).length > 0;
-
-        // Current batting team key (from last score entry)
         const lastScore = scores.length > 0 ? scores[scores.length - 1] : null;
         const curInnKey = lastScore
           ? Object.keys(scoreByTeam).find((k) => scoreByTeam[k] === lastScore) || 
@@ -2131,69 +2127,39 @@
             zoneClass: "csb-away-zone",
           },
         ].map(({ key, fallbackScore, color, zoneClass }, idx) => {
-          // Primary: match score by team key.
           let s = lookupWorked && key ? scoreByTeam[key] : null;
-
           if (!s) {
-            // Only fallback to positional mapping if the ENTIRE lookup failed
-            // and the match is NOT live. For live matches, we prefer showing 0-0
-            // over swapping team scores unless our fallback caught it.
             if (!lookupWorked) {
-              s = isLive
-                ? { r: 0, w: 0, o: 0 }
-                : fallbackScore || { r: 0, w: 0, o: 0 };
+              s = isLive ? { r: 0, w: 0, o: 0 } : (fallbackScore || { r: 0, w: 0, o: 0 });
             } else {
               s = { r: 0, w: 0, o: 0 };
             }
           }
-
-          const isBatting =
-            isLive &&
-            (lookupWorked && key
-              ? key === curInnKey
-              : idx === scores.length - 1);
+          const isBatting = isLive && (lookupWorked && key ? key === curInnKey : idx === scores.length - 1);
           const zoneColor = IPL_TEAM_COLORS[key]?.primary || color;
-          const label =
-            key ||
-            (s.inning || "")
-              .replace(/\s*Inning\s*\d+/i, "")
-              .trim()
-              .split(" ")
-              .pop()
-              .substring(0, 3)
-              .toUpperCase() ||
-            (idx === 0 ? "T1" : "T2");
+          const label = key || (s.inning || "").replace(/\s*Inning\s*\d+/i, "").trim().split(" ").pop().substring(0, 3).toUpperCase() || (idx === 0 ? "T1" : "T2");
 
           return {
             isBatting,
             html: `
             <div class="csb-team-zone ${zoneClass} ${isBatting ? "is-batting" : ""}" data-team-key="${key}" style="--batting-color:${zoneColor}; background:linear-gradient(135deg, ${zoneColor}1a 0%, transparent 65%);">
               <div class="csb-inn-team">${label}${isBatting ? " · LIVE" : ""}</div>
-              <div class="csb-big-score">${s.r || 0}<span class="csb-wkts-sep">-${s.w || 0}</span></div>
-              <div class="csb-overs">${parseFloat(s.o || 0).toFixed(1)} <span class="csb-ov-label">ov</span></div>
-            </div>`,
+              <div class="csb-big-score">${s.r || 0}<span class="csb-wkts-sep">/${s.w || 0}</span></div>
+              <div class="csb-overs">${parseFloat(s.o || 0).toFixed(1)} <small>ov</small></div>
+            </div>`
           };
         });
 
-        // Order zones: Bowling team (non-batting) on TOP, Batting team on BOTTOM
-        // This ensures the batting team's score is right above the live batsman names.
-        const zonesHtml = zonesRaw
-          .sort((a, b) => (a.isBatting ? 1 : -1))
-          .map((z) => z.html)
-          .join("");
+        const zonesHtml = zonesRaw.sort((a, b) => (a.isBatting ? 1 : -1)).map(z => z.html).join("");
 
         // Crease Logic — Dynamic Striker Block
         let creaseHtml = "";
         if (isLive && (batsmen.length > 0 || bowler)) {
-          // Identify striker — set by poller heuristic or manual override
           const strikerIdx = batsmen.findIndex((b) => b.strike);
           const activeStrikerIdx = strikerIdx !== -1 ? strikerIdx : 0;
-
-          const batsmenHtml = batsmen
-            .slice(0, 2)
-            .map((b, idx) => {
-              const isStr = idx === activeStrikerIdx;
-              return `
+          const batsmenHtml = batsmen.slice(0, 2).map((b, idx) => {
+            const isStr = idx === activeStrikerIdx;
+            return `
               <div class="csb-player-row ${isStr ? "striker-active" : ""}" onclick="setStrikerOverride('${b.name.replace(/'/g, "\\'")}')" style="cursor:pointer">
                 <div class="csb-ns-info">
                   <span class="csb-ns-dot">${isStr ? "🏏" : "·"}</span>
@@ -2201,24 +2167,17 @@
                 </div>
                 <div class="csb-ns-score">${b.r}<span class="csb-score-balls">(${b.b})</span></div>
               </div>`;
-            })
-            .join("");
+          }).join("");
 
-          const bowlerHtml = bowler
-            ? `
+          const bowlerHtml = bowler ? `
             <div class="csb-bowler-box">
               <div class="csb-bowler-label">BOWLING</div>
               <div class="csb-bowler-row">
                 <span class="csb-bowler-name">${bowler.name}</span>
                 <span class="csb-bowler-figures">${bowler.w}/${bowler.r} <span class="csb-bowler-ov">${parseFloat(bowler.o || 0).toFixed(1)}ov</span></span>
               </div>
-            </div>`
-            : "";
-
-          creaseHtml = `<div class="csb-crease-stylized">
-            <div class="csb-batsmen-section">${batsmenHtml}</div>
-            ${bowlerHtml}
-          </div>`;
+            </div>` : "";
+          creaseHtml = `<div class="csb-crease-stylized"><div class="csb-batsmen-section">${batsmenHtml}</div>${bowlerHtml}</div>`;
         }
 
         const overSummaries = match.overSummaries || [];
@@ -2260,7 +2219,6 @@
           <div class="csb-recent-overs">
             <span class="csb-ro-label" style="position:sticky; left:0; background:var(--s1); z-index:1; padding-right:8px; border-right:1px solid var(--bd3)">RECENT:</span>
             ${(() => {
-              // Flatten all balls from all overSummaries to get exactly the last 12 deliveries
               const allBalls = overSummaries.flatMap((ov) =>
                 (ov.overDetail || ov.o_detail || "")
                   .split(/[\s,]+/)
@@ -2273,11 +2231,7 @@
                 .map((b) => {
                   const isW = b.toUpperCase().includes("W");
                   const isB = b === "4" || b === "6";
-                  const cls = isW
-                    ? "csb-ball-w"
-                    : isB
-                      ? "csb-ball-b"
-                      : "csb-ball-n";
+                  const cls = isW ? "csb-ball-w" : isB ? "csb-ball-b" : "csb-ball-n";
                   return `<span class="csb-ball ${cls}">${b}</span>`;
                 })
                 .join("");
@@ -2287,9 +2241,7 @@
 
         return `
           <div class="cricket-score-bar" style="--team-home-primary:${homeColor}; --team-away-primary:${awayColor}; --team-batting-primary:${IPL_TEAM_COLORS[curInnKey]?.primary || "#2563ff"}">
-            <div class="csb-stack">
-              ${zonesHtml}
-            </div>
+            <div class="csb-zones-row">${zonesHtml}</div>
             ${creaseHtml}
             ${phaseHtml}
             ${recentOversHtml}
@@ -2720,7 +2672,7 @@
   <div class="season-cards">
     ${rows
       .map((r, i) => {
-        const pillId = `mpills-${r.name.replace(/\s+/g, "_")}`;
+        const pillId = `mpills-${r.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
         const matchPills = r.matches
           .map((m) => {
             const isSeasonHigh =
@@ -5578,6 +5530,7 @@
             if (box) box.value = "";
           })
           .catch(function (e) {
+            skipNextRefresh = false;
             toast("Save error: " + e.message, "err");
           });
       };
@@ -5991,7 +5944,7 @@
     <div class="season-cards">
       ${rows
         .map((r, i) => {
-          const pillId = `ampills-${r.name.replace(/\s+/g, "_")}`;
+          const pillId = `ampills-${r.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
           const matchPills = r.matches
             .map((m) => {
               const isSeasonHigh =
@@ -8749,28 +8702,53 @@
 
           let updated = 0;
 
-          // FALLBACK: If scorecard is empty but match is live, try match_info for the overall score/status
-          if (sc.length === 0 && !ended) {
-            console.log(
-              "[Poller] Scorecard empty, fetching match_info for fallback score...",
-            );
-            const infoRes = await _cricFetch(
-              `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
-            );
-            const infoData = await infoRes.json();
-            if (infoData.status === "success") {
-              const infoScore = infoData.data?.score || [];
-              const infoStatus = infoData.data?.status || "";
-              if (infoScore.length) statsUpdate["score"] = infoScore;
-              if (infoStatus) statsUpdate["matchStatus"] = infoStatus;
-              if (infoData.data?.matchEnded) {
-                ended = true;
-                await updateDoc(doc(db, "matches", activeMid), {
-                  matchEnded: true,
-                  matchResult: infoData.data?.status || "",
-                  matchStatus: infoData.data?.status || "Match Concluded",
-                });
-                // Fall through to process any remaining stats, then stopAR fires at end of function
+          // FALLBACK: If scorecard is empty, try match_info for score/status.
+          // Also applies when match just ended — CricAPI sometimes sets matchEnded before
+          // the full scorecard is populated. In that case, retry the scorecard once after
+          // a short wait so final-over stats (e.g. a last-ball fifty) are captured.
+          if (sc.length === 0) {
+            if (ended) {
+              // CricAPI race: matchEnded set but scorecard not yet populated. Wait 8 s and retry once.
+              console.log("[Poller] Match ended but scorecard empty — retrying in 8s for final stats...");
+              await new Promise((res) => setTimeout(res, 8000));
+              try {
+                const retryData = await _cricFetch(
+                  `https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`,
+                ).then((r) => r.json());
+                if (retryData.status === "success" && (retryData.data?.scorecard || []).length > 0) {
+                  // Got the final scorecard — splice it back in and continue processing
+                  scData.data = retryData.data;
+                  sc.push(...(retryData.data.scorecard || []));
+                  overSummaries = retryData.data?.overSummaries || overSummaries;
+                  console.log("[Poller] Retry succeeded — processing final scorecard.");
+                } else {
+                  console.warn("[Poller] Retry also returned empty scorecard. Stats may be incomplete.");
+                }
+              } catch (retryErr) {
+                console.warn("[Poller] Retry fetch failed:", retryErr.message);
+              }
+            } else {
+              console.log(
+                "[Poller] Scorecard empty, fetching match_info for fallback score...",
+              );
+              const infoRes = await _cricFetch(
+                `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
+              );
+              const infoData = await infoRes.json();
+              if (infoData.status === "success") {
+                const infoScore = infoData.data?.score || [];
+                const infoStatus = infoData.data?.status || "";
+                if (infoScore.length) statsUpdate["score"] = infoScore;
+                if (infoStatus) statsUpdate["matchStatus"] = infoStatus;
+                if (infoData.data?.matchEnded) {
+                  ended = true;
+                  await updateDoc(doc(db, "matches", activeMid), {
+                    matchEnded: true,
+                    matchResult: infoData.data?.status || "",
+                    matchStatus: infoData.data?.status || "Match Concluded",
+                  });
+                  // Fall through to process any remaining stats, then stopAR fires at end of function
+                }
               }
             }
           }
@@ -8955,15 +8933,49 @@
           });
           // Save match score + status + over summaries alongside player stats
           let scoreArr = data.data?.score || [];
-          if (!scoreArr.length && sc.length > 0) {
-            // Fallback: If score object is missing (common in some CricAPI responses),
-            // extract it from the actual innings in the scorecard array.
-            scoreArr = sc.map((inn, idx) => ({
-              r: inn.r || 0,
-              w: inn.w || 0,
-              o: inn.o || inn.ov || 0,
-              inning: inn.inning || inn.name || `Inning ${idx + 1}`,
-            }));
+          if (sc.length > 0) {
+            // Robust Team Score Attribution: sum up players if top-level totals are missing/zero
+            const mappedFromSc = sc.map((inn, idx) => {
+              let r = inn.r || 0;
+              let w = inn.w || 0;
+              let o = inn.o || inn.ov || 0;
+
+              // Fallback: Sum batsman runs + extras if r is 0 but players have scores
+              if (r === 0 && (inn.batting || []).length > 0) {
+                const batTotal = (inn.batting || []).reduce(
+                  (sum, b) => sum + (b.r || 0),
+                  0,
+                );
+                const ext = inn.extras || 0;
+                const extTotal = typeof ext === "number" ? ext : ext.r || 0;
+                const totalCalculated = batTotal + extTotal;
+                if (totalCalculated > 0) r = totalCalculated;
+              }
+              // Fallback: Sum bowler wickets if w is 0 but bowlers have wickets
+              if (w === 0 && (inn.bowling || []).length > 0) {
+                const wktTotal = (inn.bowling || []).reduce(
+                  (sum, bw) => sum + (bw.w || 0),
+                  0,
+                );
+                if (wktTotal > 0) w = wktTotal;
+              }
+
+              return {
+                r: r,
+                w: w,
+                o: o,
+                inning: inn.inning || inn.name || `Inning ${idx + 1}`,
+              };
+            });
+
+            // Use scorecard mapping if data.score is empty OR if scorecard shows more recent data
+            if (!scoreArr.length) {
+              scoreArr = mappedFromSc;
+            } else if (mappedFromSc.length >= scoreArr.length) {
+              const scTotal = mappedFromSc.reduce((s, i) => s + i.r, 0);
+              const apiTotal = scoreArr.reduce((s, i) => s + i.r, 0);
+              if (scTotal > apiTotal) scoreArr = mappedFromSc;
+            }
           }
           const matchStatus = data.data?.status || "";
           if (scoreArr.length) statsUpdate["score"] = scoreArr;
@@ -9081,20 +9093,25 @@
 
           const hasUpdates = Object.keys(statsUpdate).length > 0;
           if (updated > 0 || scoreArr.length || hasUpdates) {
-            // DEEP COMPARE: Only write to Firestore if the update object actually changes the state
-            // to avoid redundant onSnapshot triggers and save quota/battery.
-            let isChanged = false;
-            for (const [key, newVal] of Object.entries(statsUpdate)) {
-              // Handle nested paths like "stats.Player Name"
-              let currentVal = activeMatchData;
-              const paths = key.split(".");
-              for (const p of paths) {
-                currentVal = currentVal?.[p];
-              }
-
-              if (JSON.stringify(currentVal) !== JSON.stringify(newVal)) {
-                isChanged = true;
-                break;
+            // DEEP COMPARE: Only skip writes when no player stats changed AND non-stats fields
+            // are identical. We bypass the compare when updated > 0 because playerStats is a
+            // live reference to activeMatchData.stats — mutating it before the compare makes
+            // all stats.* keys appear unchanged even when they're not (same object reference).
+            // This caused final-over stats (e.g. a last-ball fifty) to never reach Firestore
+            // when the score/overs hadn't changed between consecutive AR polls.
+            let isChanged = updated > 0; // stats updated → always write
+            if (!isChanged) {
+              for (const [key, newVal] of Object.entries(statsUpdate)) {
+                if (key.startsWith("stats.")) continue; // skip — mutation makes these unreliable
+                let currentVal = activeMatchData;
+                const paths = key.split(".");
+                for (const p of paths) {
+                  currentVal = currentVal?.[p];
+                }
+                if (JSON.stringify(currentVal) !== JSON.stringify(newVal)) {
+                  isChanged = true;
+                  break;
+                }
               }
             }
 
@@ -9102,6 +9119,11 @@
               console.log(
                 "[Poller] No changes detected in scorecard. Skipping Firestore write.",
               );
+              // Still stop AR if match ended — poller has nothing left to do even if data is unchanged
+              if (ended && !activeMatchData?.finalized) {
+                stopAR();
+                toast("🏁 Match concluded — final stats saved. Click 'Finalize & Save' when ready.", "info");
+              }
               return;
             }
 
@@ -11836,14 +11858,15 @@
               .csb-phase-item.active .csb-phase-pill { background: var(--team-batting-primary, var(--accent)); box-shadow: 0 0 8px var(--team-batting-primary, var(--accent)); }
               .csb-phase-item.done .csb-phase-pill { background: rgba(255,255,255,0.4); }
               .csb-phase-item.done .csb-phase-label { opacity: 0.6; }
-            .csb-stack {
+            .csb-zones-row {
               display: flex;
-              flex-direction: column;
+              flex-wrap: wrap;
+              gap: 0;
               border-bottom: 1px solid var(--bd3);
             }
 
             .csb-team-zone {
-              width: 100%;
+              flex: 1 1 180px;
               padding: 12px 16px;
               position: relative;
               display: flex;

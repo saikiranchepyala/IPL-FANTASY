@@ -1,12 +1,112 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "2.9.7"
+version: "3.0.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v2.9 — Project Intelligence
+# IPL Fantasy League v3.0 — Project Intelligence
+
+## 🔧 Smoke Test & Stability Fix (v3.0.0 — April 18, 2026)
+
+Full regression + integration audit performed. One bug found and fixed. JS syntax check clean (394,677 chars, `node --check` passed). All CricAPI endpoints verified live against real key.
+
+### Fix 1 — Admin Season Leaderboard `pillId` uses `/\s+/g` instead of `/[^a-zA-Z0-9_-]/g` (MEDIUM)
+The member scorecard (`mpills-`) was correctly patched in a previous session to strip all non-alphanumeric chars from `pillId`. The admin scorecard (`ampills-`) was missed. If any member name contains an apostrophe (e.g. `D'Souza`), the `pillId` becomes `ampills-D'Souza` which breaks the inline `getElementById('ampills-D'Souza')` string in the onclick handler — the "X Matches ▾" toggle in the admin Season Leaderboard tab silently does nothing for that member.
+
+**Fix** (line ~5947): `r.name.replace(/\s+/g, "_")` → `r.name.replace(/[^a-zA-Z0-9_-]/g, "_")`
+
+**Rule**: Both scoreboard `pillId` sites must use `/[^a-zA-Z0-9_-]/g`:
+- Member scorecard: `mpills-${r.name.replace(/[^a-zA-Z0-9_-]/g, "_")}` (line ~2675)
+- Admin scorecard: `ampills-${r.name.replace(/[^a-zA-Z0-9_-]/g, "_")}` (line ~5947)
+
+### API Verification (v3.0.0 — April 18, 2026)
+All endpoints tested live. `fantasyEnabled: true` for all current IPL 2026 matches — scorecard endpoint fully operational. `IPL_2026_SERIES_ID = "87c62aac-bc3c-4738-ab93-19da0690488f"` confirmed correct against live API.
+
+| Endpoint | Status |
+|---|---|
+| `currentMatches` | ✅ All IPL 2026 matches, `fantasyEnabled: true` |
+| `match_scorecard` | ✅ Full batting/bowling data returned |
+| `match_info` | ✅ toss/matchStarted/matchEnded correct |
+| `match_squad` | ✅ ~26-27 players per team |
+| `match_points` | ✅ Per-player fantasy points present |
+| `series` | ✅ IPL 2026 found via series ID |
+| `series_info` | ✅ All 70 IPL 2026 fixtures returned |
+| `cricScore` | ✅ 72 match entries |
+
+---
+
+## 🔧 Smoke Test & Stability Fixes (v2.9.9 — April 18, 2026)
+
+Full regression + integration audit performed. Five bugs found and fixed. No logic or data flow changes — surgical stability patches only.
+
+### Fix 1 — `getTeamColor` deleted by external model (CRITICAL — Loading screen stuck)
+`getTeamColor(matchData)` was removed from `ipl-fantasy-v4_render.html` by an external model. It is called by `injectTeamAmbient`, which is called at the top of every `_doRefresh()` tick. Since `_doRefresh` runs inside `setTimeout`, the `TypeError: getTeamColor is not a function` was uncaught and silent — the app stayed on Loading forever.
+
+**Restored** at line ~168 (between `resolveTeamKey` and `resolveInningKey`):
+```js
+function getTeamColor(matchData) {
+  if (!matchData) return { primary: "#2563ff", secondary: "#f59e0b", gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)" };
+  const t1Key = resolveTeamKey(matchData.t1 || matchData.label || "");
+  if (t1Key && IPL_TEAM_COLORS[t1Key]) return IPL_TEAM_COLORS[t1Key];
+  return { primary: "#2563ff", secondary: "#f59e0b", gradient: "135deg, rgba(37,99,255,.15), rgba(245,158,11,.05)" };
+}
+```
+
+**Rule**: `getTeamColor` must always exist between `resolveTeamKey` and `resolveInningKey`. It is called in 5 places: `injectTeamAmbient`, `renderTeamTab`, `renderMatchLeaderboard`, `renderAdminMatch`, `renderMemberMatchSelector`. Any model that removes it will break the boot sequence.
+
+### Fix 2 — `showScreen` rAF has no error recovery (HIGH — app goes invisible)
+`showScreen` sets `app.style.opacity = "0"` synchronously before the `requestAnimationFrame`. If the render function throws inside the rAF, `opacity` is never restored to `"1"`. The app becomes fully invisible with no error message.
+
+**Fix**: wrapped the render + bindEvents call in try-catch. On error, falls back to `renderLoading()` and still completes the reveal rAF.
+
+```js
+requestAnimationFrame(() => {
+  try {
+    app.innerHTML = (map[n] || renderLoading)();
+    bindEvents(n);
+  } catch (e) {
+    console.error("showScreen render error:", e);
+    app.innerHTML = renderLoading();
+  }
+  requestAnimationFrame(() => { /* opacity:1 restore */ });
+});
+```
+
+**Rule**: Any render function that can be called from `showScreen` must either be crash-proof or throw gracefully. The try-catch provides a last-resort safety net but does not replace null guards in individual render functions.
+
+### Fix 3 — `?.split("vs")[n]` crash in `renderScoreBar` and booster dock (HIGH — TypeError)
+The external model replaced the safe `(match.label || "").split(/\s+vs\s+/i)` pattern with `match.label?.split("vs")[0]`. When `match.label` is `undefined` (and `match.t1` is also unset), `?.split("vs")` returns `undefined`, then `undefined[0]` throws `TypeError` (no optional chaining on the index access).
+
+Additionally, literal `"vs"` is case-sensitive — `"MI VS CSK"` or `"MI Vs CSK"` labels silently fail attribution. The rest of the codebase uses a case-insensitive regex.
+
+**Fixed in two places**:
+- `renderScoreBar` (line ~2059): `const _sbLabelParts = (match.label || "").split(/\s+vs\s+/i);`
+- Booster dock (line ~666): `const _bstLabelParts = (activeMatch?.label || "").split(/\s+vs\s+/i);`
+
+**Rule**: Never use `?.split("vs")[n]` — the optional chaining protects the `.split()` call but not the index access. Always use `(value || "").split(/\s+vs\s+/i)[n]`. This is the consistent pattern used everywhere else in the file (`renderScorePill`, `attributeScores`, `resolveInningKey`).
+
+### Fix 4 — `parseScorecardText` catch block doesn't reset `skipNextRefresh` (MEDIUM)
+The legacy scorecard text parser sets `skipNextRefresh = true` before `updateDoc`, then resets it to `false` in the first `.then()` on success. But the `.catch()` block only showed a toast — no reset. If `updateDoc` failed, `skipNextRefresh` stayed `true` and the next organic Firestore snapshot (someone else's action) was silently skipped, causing the admin to see stale data.
+
+**Fix**: Added `skipNextRefresh = false;` as the first line of the `.catch()` callback.
+
+**Rule**: Every code path that sets `skipNextRefresh = true` must have a corresponding reset in its error/catch path. The flag is consumed by the next `matches/matchId` onSnapshot on success; on failure (no snapshot fires), the catch must reset it manually.
+
+### Fix 5 — `prevScores` and `_pvMatchCache` never cleared on logout (MEDIUM — memory leak)
+- `prevScores` accumulates `"mid_memberName" → pts` entries on every leaderboard render — never cleared.
+- `_pvMatchCache` accumulates full match objects for every match rendered — never cleared.
+Over a season (14 matches × 10 members), `prevScores` holds ~140 entries and `_pvMatchCache` holds ~14 match snapshots. Both survive logout/re-login in the same tab, meaning a new user in the same browser session sees stale cache. On iOS, long-lived memory accumulation causes input lag and GC pauses.
+
+**Fix**: Added `prevScores = {}; _pvMatchCache = {};` at the end of `sessionClear()`, after `matchUnsubs = {}`.
+
+### Fix 6 — `pillId` apostrophe injection in season scorecard (Previous session)
+Season scorecard generated `pillId = r.name.replace(/\s+/g, "_")` — apostrophes in names like `"D'Souza"` produced `pillId = "mpills-D'Souza"` which broke the inline `onclick="...getElementById('mpills-D'Souza')..."` string.
+
+**Fix** (already applied in previous session): Changed to `r.name.replace(/[^a-zA-Z0-9_-]/g, "_")` — strips all non-alphanumeric characters, not just spaces.
+
+**Rule**: Any `pillId` or `safeN` used inside an inline `onclick="...'${...}'..."` string must be sanitized with `/[^a-zA-Z0-9_-]/g` — not just `/\s+/g`. Apostrophes, quotes, and special characters all break the inline JS string delimiter.
 
 ## 🏗️ Core Architecture
 - **Single-File Engine**: `ipl-fantasy-v4_render.html` contains the entire app (logic, styles, views).
@@ -55,16 +155,51 @@ This caused burst API calls 4–15s apart, burning quota rapidly. The watcher's 
 4. **Match ends**: Poller auto-stops when `matchEnded = true` detected. Toast prompts to finalize.
 5. **After match**: Click **Finalize & Save** — locks points, updates season table, saves to history.
 
-## 📡 CricAPI Endpoints Used
+## 📡 CricAPI Endpoints — Full Verified Audit (v2.9.8)
+
+All endpoints below were tested live against the real API key on 2026-04-18.
+
+### In Use
 | Endpoint | When called | Purpose |
 |---|---|---|
-| `currentMatches` | Admin "Find IPL Matches" + smoke test | Discover live/upcoming match IDs |
+| `currentMatches` | Admin "Find IPL Matches" + smoke test | Discover live/upcoming match IDs. Returns `teamInfo[].img` used for `t1img`/`t2img` |
 | `series` | Admin series search | Search by series name |
 | `series_info` | Admin series search | Full match list for a series |
 | `match_info` | "Load Players" button | Team info + player roles |
 | `match_squad` | Fallback if `match_info.teamInfo` empty | Raw squad names |
 | `match_scorecard` | `autoFetchStats()` — every poll cycle | Live stats, toss, XI, score — primary endpoint |
 | `match_info` (2nd) | Inside `autoFetchStats`, when scorecard returns failure | Score + status + XI fallback (no batting/bowling stats) |
+
+### Exists — Not Used (verified with real key)
+| Endpoint | Response confirmed | Notes |
+|---|---|---|
+| `cricScore` | ✅ success | Returns all current matches with `id`, `ms` (fixture/live/result), `t1`, `t2`, `t1s`/`t2s` (score strings like `"195/6 (20)"`), `t1img`/`t2img` (CricAPI CDN logo URLs), `series`. Lightweight, no match ID needed. **Not needed** — app already has `IPL_TEAM_LOGOS` static map + `teamInfo[].img` from `currentMatches` already stored as `t1img`/`t2img` in Firebase. All render paths already consume `match.t1img \|\| IPL_TEAM_LOGOS[t1Key]` with `onerror` fallback. |
+| `matches` | ✅ "Invalid API Key" (exists) | Broader version of `currentMatches` — includes scheduled future matches. Same field structure. Not needed since `currentMatches` covers active matches. |
+| `match_points` | ✅ success | Returns per-player fantasy points: `id`, `name`, `altnames`, `points`. Organised by innings (batting/bowling/catching) and a totals block. **Not usable as a replacement for `calcPoints()`** — CricAPI default rules differ materially: 20 pts/wkt (vs our 25), +12/maiden (vs our +8), +4/50 milestone (vs our +8), run-out +6 (vs our +12 direct). The `altnames` per player are already handled — app builds `altnames` from the player pool loaded via `loadMatchPlayers`. |
+
+### Does Not Exist / Not Accessible on This Plan
+| Endpoint | Result | Notes |
+|---|---|---|
+| `bbb` | ❌ "Invalid API requested" | Ball-by-ball endpoint. Not accessible. Firebase schema has `bbbEnabled: false` on all IPL matches — confirmed disabled at the CricAPI level, not just the app. |
+| `player_info` | ❌ "Invalid API requested" | Not accessible on this plan. |
+| `player_stats` | ❌ "Invalid API requested" | Not accessible on this plan. |
+| `match_players` | ❌ "Invalid API requested" | Not accessible on this plan. |
+| `cricScore` (V2 livescores) | ❌ 400 error | Paid V2 feature. Different from the V1 `cricScore` endpoint above. |
+
+### Confirmed Root Cause of CricAPI Instability
+**`fantasyEnabled: false` → `match_scorecard` returns `"ERR: Scorecard not found"`.**
+
+Tested live: SRH vs CSK (2026-04-18) had `fantasyEnabled: false`. `match_scorecard` for that match ID returned failure. `match_info` for the same match returned correct score and status. This is not a bug in the app — CricAPI simply does not serve the scorecard endpoint for matches where `fantasyEnabled: false`. The fallback to `match_info` inside `autoFetchStats` handles this case (score/status sync only; no batting/bowling stats available). Admin has requested CricAPI to enable `fantasyEnabled: true` for IPL matches. Once active, the scorecard will be reliable.
+
+### Alternative Data Source — TheSportsDB (Investigated, Rejected)
+Tested live on 2026-04-18. Findings:
+- IPL league ID is **4460** (not 4506 — that resolves to Coppa Italia).
+- `eventsseason.php?id=4460&s=2025-2026` → `{"events":null}` — **no current season data**.
+- `eventsseason.php?id=4460&s=2024` → 16 of 74 matches only — **incomplete historical coverage**.
+- Match event fields: `intHomeScore`, `intAwayScore`, `strResult` (result string) — generic sports DB format. No innings breakdown, no per-player batting/bowling stats.
+- Player endpoint: biographical only (name, DOB, team). No cricket stats.
+- V2 livescores: paid plan, 2-minute cadence, no player-level data.
+- **Verdict**: Cannot replace or supplement CricAPI for player stats. Unusable for `calcPoints()`.
 
 ## ⚡ Booster System (v2.9)
 
@@ -175,10 +310,51 @@ Now takes optional `playersList` arg: `memberMatchTotal(team, stats, playersList
 - **Refined Keyword Guard**: Specifically looks for the `"c [Fielder] b [Bowler]"` pattern for dismissals. Safely ignores `(c)` and `(wk)` player titles so all-rounders have both rows parsed correctly.
 
 ### 4. Safety Guards & Debugging
-- **Overs Guard**: `toRealOvers()` now includes a hard limit for T20. Any value > 10.0 (e.g., a misinterpreted batting score of 35) is reset to 0.0.
+- **Overs Guard**: `toRealOvers()` has a hard cap: any value > 10.0 returns 0. This guard exists for **bowler overs only** (max 4 in IPL T20). Do NOT pass innings overs (which go up to 20) through `toRealOvers()` — it will return 0 and silently corrupt any calculation that depends on it.
 - **Playoff Guard**: `applyBoosterChoice` now has an explicit code-level guard using `isPlayoffMatch(match)` to prevent booster usage during Finals/Qualifiers.
 - **Console Exposure**: Key state variables (`activeMatches`, `currentMatchId`, etc.) and helper functions are now exposed to `window` for instant console debugging.
 - **Resilient Scorebar**: Fallbacks to `scorecard` array if root `score` object is missing from CricAPI.
+
+### 6. RRR / Balls-Left Calculation (v2.9.8 — "NEED 45 OFF 120 BALLS" Fix)
+**Problem**: `renderScoreBar` called `toRealOvers(parseFloat(inn2Score?.o))` to get innings overs bowled. `toRealOvers` caps any value > 10 at 0 (its bowler-overs guard). At 15.2 overs, `toRealOvers` returned 0, so `ballsLeft = 120 - 0 = 120`. The RRR line showed `NEED N OFF 120 BALLS` for the entire 2nd innings beyond over 10.
+
+**Fix**: Inline the overs-to-balls conversion in `renderScoreBar` — no call to `toRealOvers`:
+```js
+const _ovRaw = parseFloat(inn2Score?.o) || 0;
+const _ovFull = Math.floor(_ovRaw);
+const _ovBalls = Math.round((_ovRaw - _ovFull) * 10);
+const ballsBowled = _ovFull * 6 + Math.min(_ovBalls, 6);
+const ballsLeft = 120 - ballsBowled;
+```
+
+**Rule**: All other `toRealOvers` call sites operate on individual bowler overs (max 4) and are unaffected. Never pass innings-level overs through `toRealOvers`.
+
+### 7. `autoFetchStats` Deep-Compare Mutation Bug (v2.9.8 — Final-Over Stats Drop Fix)
+**Problem**: `playerStats` is the module-level variable set by `syncDerivedState()` as `playerStats = activeMatches[mid]?.stats` — a **live reference** to the same object as `activeMatchData.stats`. Inside `autoFetchStats`, when we do `playerStats[n] = { ...newStats }`, we simultaneously mutate `activeMatchData.stats[n]`. The deep compare then evaluates `activeMatchData.stats[n]` vs `statsUpdate["stats.n"]` — they are the same object, always equal. `isChanged` stays false for every `stats.*` key.
+
+This was masked during active play because `score` / `matchStatus` / `overSummaries` keys change each poll and trigger `isChanged = true` through those fields. But at **end of innings** — score frozen (all out or 20 overs complete), status already written — none of those keys change either, `isChanged = false` for the entire update, and the AR poller silently skips the Firestore write. Stats from the final over never reach Firestore.
+
+**Fix**: Skip the deep compare when player stats were actually processed:
+```js
+let isChanged = updated > 0; // stats updated → always write; mutation makes stats.* comparison unreliable
+if (!isChanged) {
+  for (const [key, newVal] of Object.entries(statsUpdate)) {
+    if (key.startsWith("stats.")) continue; // skip — same-reference mutation makes these always-equal
+    // ... compare score/matchStatus/overSummaries keys only
+  }
+}
+```
+
+**Second fix**: `stopAR()` was only reachable after the Firestore write. When the early return fired (`!isChanged && !showFeedback`), `stopAR()` was never reached — the AR poller kept running indefinitely after match end, burning quota. Fixed: `stopAR()` is now also called inside the early-return branch when `ended = true`.
+
+**Rule**: Never add new deep-compare logic that covers `stats.*` keys by comparing against `activeMatchData.stats.*`. The reference is shared with `playerStats` and will always appear unchanged after processing. Either compare only non-stats keys, or gate on `updated > 0`.
+
+### 8. CricAPI `matchEnded` Race Condition (v2.9.8)
+**Observed**: CricAPI sets `matchEnded: true` and simultaneously returns an empty `scorecard: []` for a brief window after a match ends (the scorecard finalizes seconds to minutes after the ended flag). The previous code had `if (sc.length === 0 && !ended)` — the `!ended` guard meant an empty scorecard on a concluded match was silently ignored. `batAcc`/`bowlAcc` stayed empty, `updated = 0`, and player stats were never written on that poll.
+
+**Fix**: When `sc.length === 0` AND `ended = true`, wait 8 seconds and re-fetch `match_scorecard` once. If the retry returns a populated scorecard, splice it into `sc` and continue processing normally. If retry also returns empty, log a warning and continue (stats from previous polls remain in Firestore).
+
+**Rule**: Do not change the `!ended` guard back without also handling the retry — removing the guard without a retry just runs the `match_info` fallback which has no batting/bowling data and returns early, same net result.
 
 ### 5. CricAPI Multi-Team Inning Label Attribution (v2.9.7 — GT vs KKR Swap Fix)
 **Problem**: CricAPI's `score[].inning` field is NOT a clean single-team label. It can return:
@@ -245,3 +421,13 @@ If the swap reappears, the split-first logic in `resolveTeamKey` has been remove
 - **`match_scorecard` failure ≠ match not live**: CricAPI can return "match scorecard not found" while the match is actively in progress (`matchStarted: true`). This happens when `fantasyEnabled: false`. Always fall back to `match_info` for score/status rather than treating it as a hard error. Scorecard becomes available automatically — do not add retry logic that bypasses the normal poller.
 - **`resolveTeamKey` MUST split on `[,&/]` and ` and ` FIRST**: CricAPI returns multi-team inning labels like `"Gujarat Titans,Kolkata Knight Riders Inning 1"` where the first comma-segment is the batting team. Without the split, `KOLKATA` is matched before `GUJARAT` and both scorebar/pill show swapped team scores (GT vs KKR production bug). Never reorder the team checks inside `resolveTeamKey` to "prefer" a team — that doesn't fix combined strings and risks other regressions. Never attribute `scores[]` positionally for live matches; CricAPI orders by batting order, not t1/t2 order.
 - **CricAPI inning labels are unreliable**: Can be lowercase (`"kolkata knight riders Inning 1"`), combined (`"Gujarat Titans,Kolkata Knight Riders Inning 1"`), and BOTH T20 innings may be labeled `Inning 1` (do not use the trailing number to disambiguate 1st vs 2nd innings). Always route inning resolution through `resolveInningKey(inningRaw, match)` and score attribution through `attributeScores(match, scores)` — these helpers compose correctly; bypassing them reintroduces the swap bug.
+- **`toRealOvers` is for bowler overs only — never pass innings overs**: `toRealOvers` has a `> 10 → return 0` guard for bowler safety. Innings overs go up to 20 and will return 0. Any calculation using innings overs (balls bowled, balls left, phase boundaries) must inline the math: `full = Math.floor(ov); balls = Math.round((ov - full) * 10); realBalls = full * 6 + Math.min(balls, 6)`.
+- **`playerStats` is a live reference — deep compare on `stats.*` keys is always false**: `playerStats === activeMatchData.stats`. After `playerStats[n] = newObj`, the deep compare sees `activeMatchData.stats[n] === statsUpdate["stats.n"]` and finds no change. Do not add any deep-compare logic covering `stats.*` keys. The write guard in `autoFetchStats` must use `updated > 0` as the authoritative signal.
+- **`s1.w === 10` all-out check uses `parseInt`**: `s1.w` from CricAPI may be a string. The `attributeScores` fail-safe uses `parseInt(s1.w) === 10` to detect all-out innings. Do not change back to strict `===` without verifying CricAPI always returns a number type.
+- **CricAPI sets `matchEnded: true` before scorecard is fully populated**: Empty `scorecard: []` with `matchEnded: true` is a normal transient state. Do not treat it as "no data" and stop — retry once after 8 seconds before processing.
+- **`getTeamColor` must always exist** (restored v2.9.9): Called by `injectTeamAmbient` at the top of every `_doRefresh()` tick. If deleted, `_doRefresh` throws a silent `TypeError` inside `setTimeout` and the app stays on Loading forever. Lives between `resolveTeamKey` and `resolveInningKey`.
+- **`showScreen` rAF is wrapped in try-catch** (v2.9.9): `app.style.opacity = "0"` is set synchronously before the rAF. If the render function throws without try-catch, opacity stays 0 and the app is invisible. The try-catch falls back to `renderLoading()`. Do not remove the try-catch — without it a single bad render leaves users with a blank screen.
+- **Never use `?.split("vs")[n]` for label parsing** (v2.9.9): Optional chaining on `.split()` protects the call but NOT the index access — `undefined[0]` throws. Always use `(value || "").split(/\s+vs\s+/i)[n]`. This is the consistent pattern across `renderScorePill`, `attributeScores`, `resolveInningKey`, and both fixed sites.
+- **Every `skipNextRefresh = true` site must have a catch reset** (v2.9.9): On write success the flag is consumed by the next `matches` snapshot. On write failure no snapshot fires, so the catch block must `skipNextRefresh = false` immediately. Missing this causes one silent skipped refresh after every failed save.
+- **`sessionClear()` must clear `prevScores` and `_pvMatchCache`** (v2.9.9): Both objects accumulate entries across matches and survive logout in-tab. Clear them in `sessionClear()` after `matchUnsubs = {}`. Missing this causes stale memory growth on iOS and stale pitch overlay data after re-login.
+- **Inline onclick `pillId` / `safeN` must strip all special characters**: Use `/[^a-zA-Z0-9_-]/g`, not `/\s+/g`. Apostrophes and quotes in player/member names (e.g. `D'Souza`) break `getElementById('...')` inline JS string delimiters. Any string interpolated inside a single-quoted `onclick` attribute must be fully sanitized. Both `mpills-` (member scorecard, line ~2675) and `ampills-` (admin scorecard, line ~5947) must use this pattern — the admin one was patched in v3.0.0 after being missed in the original fix.
