@@ -33,7 +33,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 | Frontend | Vanilla HTML/CSS/JS — single file, no build step |
 | Database | Firebase Firestore (free tier) |
 | Hosting | Netlify Drop (free tier) |
-| Cricket Data | [CricketData.org](https://cricketdata.org) API (free tier, 2000 calls/day) |
+| Cricket Data | [CricketData.org](https://cricketdata.org) API (paid plan) |
 
 ---
 
@@ -213,7 +213,7 @@ Each member gets a season inventory of boosters — usable in league stage match
 2. Copy your API key from the dashboard
 3. Paste it in **Admin → Current Match → API Key** → Save
 
-Free tier: **2000 calls/day** — sufficient for a full IPL season with live auto-refresh.
+This app uses a **paid CricketData.org API plan** for reliable scorecard access across all IPL matches.
 
 > **Note:** Scorecard data requires `fantasyEnabled: true` on the match. All IPL 2026 matches have this enabled as of the current season.
 
@@ -225,7 +225,7 @@ Free tier: **2000 calls/day** — sufficient for a full IPL season with live aut
 - **Auto-refresh requires admin tab open** — the live poller only runs while the admin panel is open. Keep your screen active during the match.
 - **Firestore rules are open** — fine for a private friend group; not suitable for a public app.
 - **Playoffs/finals** — boosters are disabled for playoff matches (Qualifiers, Eliminators, Final).
-- **Free tier limits** — Firestore free tier: 50,000 reads / 20,000 writes per day — more than sufficient for a 25-member group across a full season.
+- **Firestore free tier** — 50,000 reads / 20,000 writes per day — more than sufficient for a 25-member group across a full season.
 
 ---
 
