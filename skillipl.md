@@ -1,12 +1,45 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.0.0"
+version: "3.1.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.0 — Project Intelligence
+# IPL Fantasy League v3.1 — Project Intelligence
+
+## 🔧 Final-Over Stats Fix (v3.1.0 — April 19, 2026)
+
+**Root cause**: CricAPI's scorecard endpoint lags 1-2 overs behind live play. When `matchEnded: true` fires, our AR poller wrote whatever CricAPI had at that moment (stale by 1-2 overs) then called `stopAR()` and died. The v2.9.8 8-second retry only handles `sc.length === 0` (completely empty scorecard) — it does nothing when the scorecard is populated but stale. Admin was forced to use the manual scorecard parser for the final over every match.
+
+**Fix**: Replaced both `stopAR()` + toast blocks on `ended` detection with `_handleMatchEnd(activeMid)`. On first detection, the recurring interval stops but a single grace poll fires 60 seconds later — giving CricAPI time to commit the final scorecard. On the grace poll's completion, the poller truly stops. Uses `activeMid` as a key so the grace poll is silently cancelled if admin navigates away (stopAR clears `_arGracePollMid`).
+
+```js
+function _handleMatchEnd(activeMid) {
+  if (window._arGracePollMid !== activeMid) {
+    // First detection — stop interval, schedule grace poll in 60s
+    stopAR();
+    window._arGracePollMid = activeMid;
+    toast("🏁 Match ended — fetching final stats in 60s...", "info");
+    setTimeout(() => {
+      if (window._arGracePollMid === activeMid) autoFetchStats(false);
+    }, 60000);
+  } else {
+    // Grace poll completed — truly stop now
+    window._arGracePollMid = null;
+    stopAR();
+    toast("🏁 Final stats saved. Click 'Finalize & Save' when ready.", "info");
+  }
+}
+```
+
+`stopAR()` now also clears `window._arGracePollMid = null` so any navigate-away cancels the grace poll.
+
+**Rule**: Never call `stopAR()` directly on `ended` detection inside `autoFetchStats`. Always route through `_handleMatchEnd`. The two call sites are the early-return branch (`!isChanged && !showFeedback`) and the post-write branch — both use `_handleMatchEnd(activeMid)`.
+
+**What this does NOT fix**: CricAPI lag *during* the match (scorecard 1-2 overs behind while play is live). That is a CricAPI limitation — use "Fetch Now" manually in the final 2 overs if stats feel behind. The grace poll only rescues the final committed stats after `matchEnded` fires.
+
+---
 
 ## 🔧 Smoke Test & Stability Fix (v3.0.0 — April 18, 2026)
 
@@ -424,7 +457,8 @@ If the swap reappears, the split-first logic in `resolveTeamKey` has been remove
 - **`toRealOvers` is for bowler overs only — never pass innings overs**: `toRealOvers` has a `> 10 → return 0` guard for bowler safety. Innings overs go up to 20 and will return 0. Any calculation using innings overs (balls bowled, balls left, phase boundaries) must inline the math: `full = Math.floor(ov); balls = Math.round((ov - full) * 10); realBalls = full * 6 + Math.min(balls, 6)`.
 - **`playerStats` is a live reference — deep compare on `stats.*` keys is always false**: `playerStats === activeMatchData.stats`. After `playerStats[n] = newObj`, the deep compare sees `activeMatchData.stats[n] === statsUpdate["stats.n"]` and finds no change. Do not add any deep-compare logic covering `stats.*` keys. The write guard in `autoFetchStats` must use `updated > 0` as the authoritative signal.
 - **`s1.w === 10` all-out check uses `parseInt`**: `s1.w` from CricAPI may be a string. The `attributeScores` fail-safe uses `parseInt(s1.w) === 10` to detect all-out innings. Do not change back to strict `===` without verifying CricAPI always returns a number type.
-- **CricAPI sets `matchEnded: true` before scorecard is fully populated**: Empty `scorecard: []` with `matchEnded: true` is a normal transient state. Do not treat it as "no data" and stop — retry once after 8 seconds before processing.
+- **CricAPI sets `matchEnded: true` before scorecard is fully populated**: Empty `scorecard: []` with `matchEnded: true` is a normal transient state handled by the 8s retry. A populated-but-stale scorecard with `matchEnded: true` is also normal — handled by the 60s grace poll in `_handleMatchEnd`. Never call `stopAR()` directly on `ended` detection; always call `_handleMatchEnd(activeMid)`.
+- **CricAPI scorecard lags 1-2 overs during live play**: Not fixable in code. Use the "Fetch Now" button manually in the final 2 overs to minimise lag. The grace poll rescues post-match final stats; in-match lag is a CricAPI limitation.
 - **`getTeamColor` must always exist** (restored v2.9.9): Called by `injectTeamAmbient` at the top of every `_doRefresh()` tick. If deleted, `_doRefresh` throws a silent `TypeError` inside `setTimeout` and the app stays on Loading forever. Lives between `resolveTeamKey` and `resolveInningKey`.
 - **`showScreen` rAF is wrapped in try-catch** (v2.9.9): `app.style.opacity = "0"` is set synchronously before the rAF. If the render function throws without try-catch, opacity stays 0 and the app is invisible. The try-catch falls back to `renderLoading()`. Do not remove the try-catch — without it a single bad render leaves users with a blank screen.
 - **Never use `?.split("vs")[n]` for label parsing** (v2.9.9): Optional chaining on `.split()` protects the call but NOT the index access — `undefined[0]` throws. Always use `(value || "").split(/\s+vs\s+/i)[n]`. This is the consistent pattern across `renderScorePill`, `attributeScores`, `resolveInningKey`, and both fixed sites.

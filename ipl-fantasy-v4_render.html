@@ -9119,10 +9119,8 @@
               console.log(
                 "[Poller] No changes detected in scorecard. Skipping Firestore write.",
               );
-              // Still stop AR if match ended — poller has nothing left to do even if data is unchanged
               if (ended && !activeMatchData?.finalized) {
-                stopAR();
-                toast("🏁 Match concluded — final stats saved. Click 'Finalize & Save' when ready.", "info");
+                _handleMatchEnd(activeMid);
               }
               return;
             }
@@ -9161,14 +9159,10 @@
           }
 
           // Auto-stop poller when API confirms match has ended.
-          // Final stats are already written above — no point burning quota polling a dead match.
-          // Admin clicks "Finalize & Save" at their own pace; no more polling needed.
+          // Uses grace-poll strategy: stopAR fires immediately but one more fetch runs 60s later
+          // to capture final-over stats that CricAPI hadn't committed yet when matchEnded was set.
           if (ended && !activeMatchData?.finalized) {
-            stopAR();
-            toast(
-              "🏁 Match concluded — final stats saved. Click 'Finalize & Save' when ready.",
-              "info",
-            );
+            _handleMatchEnd(activeMid);
           }
         } catch (e) {
           if (showFeedback) toast("Error: " + e.message, "err");
@@ -9281,6 +9275,30 @@
           arTimer = null;
         }
         arSecs = 0;
+        window._arGracePollMid = null; // cancel any pending grace poll for this match
+      }
+
+      // Called when matchEnded is first detected. Stops the recurring interval but schedules
+      // one grace poll 60s later — CricAPI scorecard typically lags 1-2 overs after matchEnded
+      // is set, so the stats written on the "ended" poll are stale. The grace poll gives CricAPI
+      // time to finalise the scorecard and captures final-over stats before truly stopping.
+      // Uses activeMid as a key: if admin navigates away (stopAR clears _arGracePollMid),
+      // the grace poll is silently skipped.
+      function _handleMatchEnd(activeMid) {
+        if (window._arGracePollMid !== activeMid) {
+          // First detection — stop interval, schedule grace poll
+          stopAR();
+          window._arGracePollMid = activeMid;
+          toast("🏁 Match ended — fetching final stats in 60s...", "info");
+          setTimeout(() => {
+            if (window._arGracePollMid === activeMid) autoFetchStats(false);
+          }, 60000);
+        } else {
+          // Grace poll completed — truly stop now
+          window._arGracePollMid = null;
+          stopAR();
+          toast("🏁 Final stats saved. Click 'Finalize & Save' when ready.", "info");
+        }
       }
 
       // ── Helpers ──
