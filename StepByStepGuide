@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.0.0
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.2.0
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,11 +152,20 @@ Step 12 — Before match day
 
 Step 13 — After the toss (~30 min before first ball)
 
-  Click "Fetch Playing XI" once
-    → App detects the toss from CricAPI and writes it to Firebase
-    → A background watcher auto-starts, polling every 90 seconds
-    → You'll get a "✅ Playing XI auto-detected for both teams!" toast
-    → No further action needed — XI confirms itself automatically
+  Click "TOSS DONE — FETCH XI"
+    → App polls CricAPI every 20 seconds, up to 20 attempts (~7 min)
+    → You'll get a "✅ Playing XI confirmed for both teams!" toast if successful
+    → No further action needed once confirmed
+
+  If CricAPI doesn't return XI data (API lag between toss and first ball):
+    → Expand the "📋 XI not loading from API? Paste manually ▾" panel
+       (visible below the FETCH XI button when XI is not yet confirmed)
+    → Copy the Playing XI from WhatsApp, Cricbuzz, Tribune India, or any source
+    → Paste both teams' names into the textarea (comma or newline separated)
+    → For impact substitutes, prefix their line with "Impact:" e.g.:
+         Impact: Marcus Stoinis, Xavier Bartlett
+    → Click "Mark Playing XI"
+    → App fuzzy-matches names against the player pool and sets XI ready
 
 Step 14 — First ball
 
@@ -176,8 +185,9 @@ Step 15 — During the match
 
 Step 16 — After the match
 
-  Poller auto-stops when CricAPI signals the match is over
-  You'll see: "🏁 Match concluded — final stats saved. Click Finalize when ready."
+  Poller fires one final fetch 60 seconds after CricAPI signals match over
+    → This grace poll captures any last-over stats that lagged behind
+  You'll see: "🏁 Final stats saved. Click 'Finalize & Save' when ready."
   Fix any remaining fielding stats
   Click "✅ Finalize & Save to Season" → confirm
     → Points locked into the season leaderboard permanently
@@ -234,13 +244,22 @@ Firestore permission denied error
     and "Publish" was clicked.
 
 Playing XI not loading after toss
-  → Click "Fetch Playing XI" once — this triggers the auto-watcher.
-    If XI still doesn't appear after 5–10 min, CricAPI may not have
-    announced it yet. The watcher retries for up to 60 minutes.
+  → Click "TOSS DONE — FETCH XI" — the watcher polls for ~7 minutes.
+    If it times out, use the "📋 XI not loading from API?" panel that
+    appears below the button. Copy the XI from anywhere (WhatsApp,
+    Cricbuzz, Tribune India) and paste it in. The app fuzzy-matches
+    names and marks XI ready automatically.
 
 Players not loading from "Find IPL Matches"
   → Check the API key is saved (Admin → Current Match → API Key).
     Try again after a minute — CricAPI occasionally has brief delays.
+
+Final-over stats not showing after match ends
+  → The poller automatically fires one final fetch 60 seconds after
+    CricAPI reports the match as over — this captures last-over data.
+    Wait for the "Final stats saved" toast before clicking Finalize.
+    If stats are still missing, correct them manually in the Player
+    Stats grid before finalizing.
 
 Someone forgot their PIN
   → They can re-register with the same join link using the same name

@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.0.0** — [Changelog](#-changelog)
+**Current version: v3.2.0** — [Changelog](#-changelog)
 
 ---
 
@@ -14,7 +14,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 - **6-player team cap** — max 6 players from any one IPL team
 - **Booster system** — Triple (3×), Double (2×), and Team (2×) boosters per season; one per match
 - **Toss reveal mechanic** — all teams hidden until admin locks the match at first ball
-- **Auto Playing XI detection** — background watcher polls CricAPI after toss; no admin action needed
+- **Auto Playing XI detection** — background watcher polls CricAPI after toss; manual paste fallback if API is slow
 - **Live points** — auto-fetches scorecard from CricketData.org API every ~5 minutes
 - **Impact Sub support** — automatic status flip when sub enters
 - **Season leaderboard** — cumulative points table with match-by-match breakdown and booster badges
@@ -102,10 +102,10 @@ Save the file.
 | Time | Action |
 |---|---|
 | Before match day | Create match, fill Label + Team 1/2, click **Find IPL Matches** → select → player pool loads |
-| ~30 min before first ball | Click **Fetch Playing XI** once after toss. Auto-watcher starts — no further action needed |
+| ~30 min before first ball | Click **Fetch Playing XI** once after toss. Auto-watcher starts. If CricAPI is slow, expand **"XI not loading from API?"** panel and paste both XIs manually |
 | First ball | Click **START MATCH** — locks picks, reveals leaderboard, starts live stats |
-| During match | Stats auto-update every ~5 min while admin tab is open |
-| Match ends | Poller auto-stops. Toast prompts to finalize |
+| During match | Stats auto-update every ~5 min while admin tab is open. Manual fetch available anytime |
+| Match ends | Poller fires one final fetch 60s after match end to catch last-over stats, then auto-stops |
 | After match | Click **Finalize & Save** — locks points, updates season table |
 
 ### Members — Each Match
@@ -223,6 +223,7 @@ This app uses a **paid CricketData.org API plan** for reliable scorecard access 
 
 - **Catches/stumpings/run-outs** — CricAPI doesn't always populate these reliably; may need manual entry after the match.
 - **Auto-refresh requires admin tab open** — the live poller only runs while the admin panel is open. Keep your screen active during the match.
+- **Playing XI between toss and first ball** — CricAPI occasionally doesn't return XI status in this window. Use the "XI not loading from API?" paste panel in the Current Match tab to mark players manually.
 - **Firestore rules are open** — fine for a private friend group; not suitable for a public app.
 - **Playoffs/finals** — boosters are disabled for playoff matches (Qualifiers, Eliminators, Final).
 - **Firestore free tier** — 50,000 reads / 20,000 writes per day — more than sufficient for a 25-member group across a full season.
