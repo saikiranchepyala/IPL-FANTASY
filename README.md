@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.3.0** — [Changelog](#-changelog)
+**Current version: v3.4.0** — [Changelog](#-changelog)
 
 ---
 
@@ -255,6 +255,13 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.4.0 — April 20, 2026
+- Fixed auto-refresh button stuck at "⏸ OFF" in Player Stats tab — three compounding issues:
+  - Renamed `arInterval` → `arIntervalTimer` to avoid clashing with `<select id="arInterval">` DOM element
+  - Added `window.arStoredSecs` persistence so the dropdown doesn't reset to "30 sec" on every re-render
+  - Removed overly strict `liveMatchId` guard from `startAR` — was blocking the timer from starting; `autoFetchStats` already handles missing `liveMatchId` gracefully
+- Auto-refresh can now start before match lock (pre-match XI polling supported)
 
 ### v3.3.0 — April 20, 2026
 - Fixed `renderStatsGrid` out-badge `†` showing for all auto-fetched batters (including not-outs) — `!s.notOut` is always `true` after `autoFetchStats` sets `notOut: null`; fix uses `bat_notOut ?? notOut`
