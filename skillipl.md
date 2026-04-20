@@ -10,7 +10,7 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 
 ## 🔧 Auto-Refresh Button Fix (v3.4.0 — April 20, 2026)
 
-**Root cause**: Three issues combined to leave the button permanently stuck at "⏸ OFF":
+**Root cause**: Three compounding issues combined to leave the button permanently stuck at "⏸ OFF":
 
 ### Fix 1 — `arInterval` variable shadowing (rename to `arIntervalTimer`)
 `let arInterval` shadowed the `<select id="arInterval">` DOM element in some browser environments, causing `parseInt(arInterval?.value)` to fail silently. Renamed the JS variable to `arIntervalTimer` everywhere.
