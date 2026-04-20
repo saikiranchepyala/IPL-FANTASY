@@ -8,20 +8,26 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 
 # IPL Fantasy League v3.4 — Project Intelligence
 
-## 🔧 Auto-Refresh UI & Logic Hardening (v3.4.0 — April 20, 2026)
+## 🔧 Auto-Refresh Button Fix (v3.4.0 — April 20, 2026)
 
-**Root cause**: The auto-refresh (AR) system had three points of failure: (1) `startAR` strictly required `match.locked`, blocking its use for pre-match XI fetching; (2) `adminToggleAR` showed a success toast even if the guard failed; (3) the `arInterval` global variable was shadowed by the HTML `<select id="arInterval">`, causing the button to always evaluate as "ON" (green) in the template.
+**Root cause**: Three issues combined to leave the button permanently stuck at "⏸ OFF":
 
-### Fix 1 — Persistent Interval Selection
-Added `window.arStoredSecs` (default 30) to track the admin's chosen interval. The `<select>` now has an `onchange` handler that updates this global, and the template uses it to set the `selected` attribute. This prevents the dropdown from resetting to "30 sec" on every re-render.
+### Fix 1 — `arInterval` variable shadowing (rename to `arIntervalTimer`)
+`let arInterval` shadowed the `<select id="arInterval">` DOM element in some browser environments, causing `parseInt(arInterval?.value)` to fail silently. Renamed the JS variable to `arIntervalTimer` everywhere.
 
-### Fix 2 — Relaxed startAR Guard
-Removed `!match.locked` from the `startAR` guard. Auto-refresh can now be started anytime a `liveMatchId` is present. This is critical for admins who want to auto-poll for Playing XI updates before the match officially "starts" in the app.
+### Fix 2 — `arStoredSecs` persistence across re-renders
+`_doRefresh()` replaces `adminContent.innerHTML` on every tick — the dropdown always re-rendered with the default "30 sec" option. Added `window.arStoredSecs = 30` (init) and `onchange="window.arStoredSecs = parseInt(this.value)"` on the select; rendered options use `${window.arStoredSecs === N ? "selected" : ""}` to restore the chosen interval.
 
-### Fix 3 — Shadowing & Toggle Logic
-Renamed the global timer variable from `arInterval` to `arIntervalTimer`. This resolves the conflict with the DOM element ID. `adminToggleAR` was also updated to check the return value of `startAR()` before showing the "ON 🟢" toast, ensuring feedback is accurate.
+### Fix 3 — Removed overly strict `liveMatchId` guard (main green-button bug)
+A guard was added to `startAR` that returned `false` and showed "Set liveMatchId first" if `match.liveMatchId` wasn't set. This blocked `arIntervalTimer` from being set, so `refreshView()` always rendered the button as "⏸ OFF". `autoFetchStats` already handles missing `liveMatchId` gracefully (silent bail), so the guard was redundant and harmful. **Removed.**
 
-**Rule**: Always use `arIntervalTimer` for the JavaScript `setInterval` handle. The ID `arInterval` is reserved for the DOM element.
+The `!match.locked` guard was also removed — auto-refresh can now start before the match is locked (needed for pre-match XI polling).
+
+**Rule**: `startAR` only blocks on `match.finalized`. Never add guards that silently prevent `arIntervalTimer` from being set — the visual button state is derived directly from `arIntervalTimer`, so any silent return leaves the UI showing "⏸ OFF" with no explanation.
+
+**`adminToggleAR` checks `startAR` return value**: Toast only fires if `startAR` returns `true`; no misleading "ON 🟢" on a finalized match.
+
+**Rule**: Always use `arIntervalTimer` for the `setInterval` handle. The ID `arInterval` is reserved for the DOM `<select>` element.
 
 ---
 

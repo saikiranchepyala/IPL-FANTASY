@@ -9282,10 +9282,6 @@
           console.log("Match already finalized. Auto-refresh not started.");
           return false;
         }
-        if (!match?.liveMatchId) {
-          toast("Set liveMatchId first", "err");
-          return false;
-        }
         stopAR();
         arSecs = secs;
         autoFetchStats();
