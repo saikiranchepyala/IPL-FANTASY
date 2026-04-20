@@ -5118,9 +5118,10 @@
 
         if (foundCount > 0) {
           // Set xiReady if 22+ players total are marked as "playing" (existing + this batch)
-          if (!activeMatchData?.xiReady) {
+          const matchNow = getMatch(activeMid);
+          if (!matchNow?.xiReady) {
             const nowPlaying = new Set(
-              Object.entries(activeMatchData?.playerStatus || {})
+              Object.entries(playerStatus)
                 .filter(([, v]) => v === "playing")
                 .map(([n]) => n)
             );
