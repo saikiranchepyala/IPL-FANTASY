@@ -793,6 +793,7 @@
       let arInterval = null,
         arTimer = null,
         arSecs = 0;
+      window.arStoredSecs = 30;
       // CricAPI quota tracker (resets daily; persisted in localStorage to survive reloads)
       const _QUOTA_KEY = "cric_api_calls_" + new Date().toDateString();
       let _cricApiCalls = parseInt(localStorage.getItem(_QUOTA_KEY) || "0");
@@ -4925,12 +4926,12 @@
         <button class="btn-sm" id="saveAllStatsBtn" onclick="saveAllStats()" style="background:var(--accent);color:var(--white);border-color:var(--accent)">💾 Save All</button>
         <div class="ar-wrap">
           <span class="ar-lbl">Auto every</span>
-          <select class="ar-sel" id="arInterval">
-            <option value="0">Off</option>
-            <option value="30" selected>30 sec</option>
-            <option value="60">1 min</option>
-            <option value="120">2 min</option>
-            <option value="300">5 min</option>
+          <select class="ar-sel" id="arInterval" onchange="window.arStoredSecs = parseInt(this.value)">
+            <option value="0" ${window.arStoredSecs === 0 ? "selected" : ""}>Off</option>
+            <option value="30" ${window.arStoredSecs === 30 ? "selected" : ""}>30 sec</option>
+            <option value="60" ${window.arStoredSecs === 60 ? "selected" : ""}>1 min</option>
+            <option value="120" ${window.arStoredSecs === 120 ? "selected" : ""}>2 min</option>
+            <option value="300" ${window.arStoredSecs === 300 ? "selected" : ""}>5 min</option>
           </select>
           <button class="ar-btn ${arInterval ? "ar-on" : "ar-off"}" onclick="adminToggleAR()">${arInterval ? "🟢 ON" : "⏸ OFF"}</button>
           ${arInterval ? `<span class="ar-cd" id="arCountdown">next in ${arSecs}s</span>` : ""}
@@ -7894,10 +7895,12 @@
             toast("Select interval", "err");
             return;
           }
-          startAR(secs);
-          toast(
-            `Auto-refresh every ${secs >= 60 ? secs / 60 + " min" : secs + "s"} — ON 🟢`,
-          );
+          const started = startAR(secs);
+          if (started) {
+            toast(
+              `Auto-refresh every ${secs >= 60 ? secs / 60 + " min" : secs + "s"} — ON 🟢`,
+            );
+          }
         }
         refreshView();
       };
@@ -9273,13 +9276,15 @@
       // ── Auto-refresh ──
       function startAR(secs) {
         const match = getMatch(getActiveMid());
-        // Only start if match is locked and not yet finalized.
-        // matchEnded is NOT a blocker — we keep polling until admin finalizes to capture late stats (3rd umpire etc.)
-        if (!match?.locked || match?.finalized) {
-          console.log(
-            "Match not locked or already finalized. Auto-refresh not started.",
-          );
-          return;
+        // Only start if match is not yet finalized.
+        // We now allow starting even if !match?.locked to enable pre-match XI tracking.
+        if (match?.finalized) {
+          console.log("Match already finalized. Auto-refresh not started.");
+          return false;
+        }
+        if (!match?.liveMatchId) {
+          toast("Set liveMatchId first", "err");
+          return false;
         }
         stopAR();
         arSecs = secs;
@@ -9293,6 +9298,7 @@
           const el = document.getElementById("arCountdown");
           if (el) el.textContent = `next in ${arSecs}s`;
         }, 1000);
+        return true;
       }
       function stopAR() {
         if (arInterval) {
