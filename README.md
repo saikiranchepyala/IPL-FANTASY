@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.4.0** — [Changelog](#-changelog)
+**Current version: v3.5.0** — [Changelog](#-changelog)
 
 ---
 
@@ -255,6 +255,9 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.5.0 — April 20, 2026
+- Added 6 new dark themes: **Cyberpunk** (neon pink + cyan), **Synthwave** (80s retro purple/yellow), **Abyss** (deep ocean teal), **Matrix** (hacker green), **Carbon** (monochrome silver), **Blood Moon** (crimson red)
 
 ### v3.4.0 — April 20, 2026
 - Fixed auto-refresh button stuck at "⏸ OFF" in Player Stats tab — three compounding issues:

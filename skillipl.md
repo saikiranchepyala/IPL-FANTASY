@@ -1,12 +1,29 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.4.0"
+version: "3.5.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.4 — Project Intelligence
+# IPL Fantasy League v3.5 — Project Intelligence
+
+## 🎨 6 New Dark Themes (v3.5.0 — April 20, 2026)
+
+Added 6 new themes to the Pro Skins picker, each fully distinct from the existing 16:
+
+| Theme | Key | Accent | Vibe |
+|---|---|---|---|
+| **Cyberpunk** | `neon-cyberpunk` | Hot pink `#FF0099` + cyan `#00FFCC` | Blade Runner neon on void black |
+| **Synthwave** | `synthwave` | Pink `#FF58C6` + yellow `#FFDE0A` | 80s retro retrowave purple |
+| **Abyss** | `abyss` | Teal `#00E5CC` + electric `#7DF9FF` | Deep ocean bioluminescent |
+| **Matrix** | `matrix` | Green `#00FF41` | Hacker terminal on void black |
+| **Carbon** | `carbon-phantom` | Silver `#D8D8D8` + bronze `#C8A060` | Carbon fiber monochrome sleek |
+| **Blood Moon** | `blood-moon` | Crimson `#CC001E` + pale silver | Near-black horror red |
+
+**Rule**: Each theme must define all CSS variables: `--bg`, `--s1–s3`, `--bd/2/3`, `--accent/2/3/glow`, `--gold/2/3/glow`, `--text/2`, `--muted/2`, `--glass`, `--glass-border`, `--glass-hover`, `--card-bg`, `--nav-bg`, `--green`, `--red`, `--team-glow-color`. Missing any causes rendering fallback to the default Midnight theme values.
+
+---
 
 ## 🔧 Auto-Refresh Button Fix (v3.4.0 — April 20, 2026)
 

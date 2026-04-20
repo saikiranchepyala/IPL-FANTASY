@@ -9431,6 +9431,24 @@
             <button class="theme-option" data-theme="bronze-circuit">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#080706,#CD7F32,#FFD700)"></span>Bronze
             </button>
+            <button class="theme-option" data-theme="neon-cyberpunk">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#030508,#FF0099,#00FFCC)"></span>Cyberpunk
+            </button>
+            <button class="theme-option" data-theme="synthwave">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#0A0615,#FF58C6,#FFDE0A)"></span>Synthwave
+            </button>
+            <button class="theme-option" data-theme="abyss">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#020408,#00E5CC,#7DF9FF)"></span>Abyss
+            </button>
+            <button class="theme-option" data-theme="matrix">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#000800,#00FF41)"></span>Matrix
+            </button>
+            <button class="theme-option" data-theme="carbon-phantom">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#050505,#D8D8D8,#C8A060)"></span>Carbon
+            </button>
+            <button class="theme-option" data-theme="blood-moon">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#050203,#CC001E,#E8C8C8)"></span>Blood Moon
+            </button>
           </div>
         </div>
       </div>
@@ -9964,6 +9982,91 @@
               --nav-bg: rgba(8, 7, 6, 0.97);
               --green: #86efac; --red: #f87171;
               --team-glow-color: #CD7F32;
+            }
+
+
+            /* neon-cyberpunk — Hot pink + electric cyan on pure black */
+            [data-theme='neon-cyberpunk'] {
+              --bg: #030508; --s1: #070A12; --s2: #0D0F1E; --s3: #131628;
+              --bd: rgba(255,0,153,.15); --bd2: rgba(255,0,153,.25); --bd3: rgba(255,0,153,.40);
+              --accent: #FF0099; --accent2: #cc007a; --accent3: rgba(255,0,153,.1); --accent-glow: rgba(255,0,153,.55);
+              --gold: #00FFCC; --gold2: #00ccaa; --gold3: rgba(0,255,204,.1); --gold-glow: rgba(0,255,204,.45);
+              --text: #FFFFFF; --text2: #FF99DD; --muted: #1a0014; --muted2: #aa3388;
+              --glass: rgba(255,0,153,.06); --glass-border: rgba(255,0,153,.38); --glass-hover: rgba(255,0,153,.16);
+              --card-bg: linear-gradient(145deg, rgba(10,4,18,.97) 0%, rgba(5,2,12,.95) 100%);
+              --nav-bg: rgba(3, 5, 8, 0.97);
+              --green: #00FFCC; --red: #FF0099;
+              --team-glow-color: #FF0099;
+            }
+
+            /* synthwave — 80s retro purple + hot pink + neon yellow */
+            [data-theme='synthwave'] {
+              --bg: #0A0615; --s1: #120B22; --s2: #1A1030; --s3: #22163E;
+              --bd: rgba(255,88,198,.14); --bd2: rgba(255,88,198,.24); --bd3: rgba(255,88,198,.36);
+              --accent: #FF58C6; --accent2: #d43da3; --accent3: rgba(255,88,198,.1); --accent-glow: rgba(255,88,198,.5);
+              --gold: #FFDE0A; --gold2: #e6c800; --gold3: rgba(255,222,10,.1); --gold-glow: rgba(255,222,10,.42);
+              --text: #FFD9F5; --text2: #D4A0E8; --muted: #281042; --muted2: #8855aa;
+              --glass: rgba(255,88,198,.06); --glass-border: rgba(255,88,198,.36); --glass-hover: rgba(255,88,198,.16);
+              --card-bg: linear-gradient(145deg, rgba(18,8,34,.97) 0%, rgba(10,5,20,.95) 100%);
+              --nav-bg: rgba(10, 6, 21, 0.97);
+              --green: #72FF72; --red: #FF58C6;
+              --team-glow-color: #FF58C6;
+            }
+
+            /* abyss — Deep ocean bioluminescent teal on obsidian black */
+            [data-theme='abyss'] {
+              --bg: #020408; --s1: #040810; --s2: #081018; --s3: #0c1820;
+              --bd: rgba(0,229,204,.12); --bd2: rgba(0,229,204,.22); --bd3: rgba(0,229,204,.34);
+              --accent: #00E5CC; --accent2: #00bba6; --accent3: rgba(0,229,204,.1); --accent-glow: rgba(0,229,204,.52);
+              --gold: #7DF9FF; --gold2: #5fd8e0; --gold3: rgba(125,249,255,.1); --gold-glow: rgba(125,249,255,.42);
+              --text: #E0FFFE; --text2: #9EEFED; --muted: #041c22; --muted2: #3d9090;
+              --glass: rgba(0,229,204,.06); --glass-border: rgba(0,229,204,.32); --glass-hover: rgba(0,229,204,.14);
+              --card-bg: linear-gradient(145deg, rgba(4,12,18,.97) 0%, rgba(2,6,10,.95) 100%);
+              --nav-bg: rgba(2, 4, 8, 0.97);
+              --green: #00E5CC; --red: #ff6b6b;
+              --team-glow-color: #00E5CC;
+            }
+
+            /* matrix — Hacker green on void black */
+            [data-theme='matrix'] {
+              --bg: #000800; --s1: #001000; --s2: #001800; --s3: #002200;
+              --bd: rgba(0,255,65,.12); --bd2: rgba(0,255,65,.22); --bd3: rgba(0,255,65,.34);
+              --accent: #00FF41; --accent2: #00cc34; --accent3: rgba(0,255,65,.1); --accent-glow: rgba(0,255,65,.52);
+              --gold: #73FF00; --gold2: #5ccc00; --gold3: rgba(115,255,0,.1); --gold-glow: rgba(115,255,0,.42);
+              --text: #CCFFCC; --text2: #88CC88; --muted: #003300; --muted2: #116611;
+              --glass: rgba(0,255,65,.06); --glass-border: rgba(0,255,65,.32); --glass-hover: rgba(0,255,65,.14);
+              --card-bg: linear-gradient(145deg, rgba(0,18,0,.97) 0%, rgba(0,10,0,.95) 100%);
+              --nav-bg: rgba(0, 8, 0, 0.97);
+              --green: #00FF41; --red: #FF3D3D;
+              --team-glow-color: #00FF41;
+            }
+
+            /* carbon-phantom — Pitch black carbon fiber with silver chrome + brushed gold */
+            [data-theme='carbon-phantom'] {
+              --bg: #050505; --s1: #0A0A0A; --s2: #141414; --s3: #1C1C1C;
+              --bd: rgba(220,220,220,.12); --bd2: rgba(220,220,220,.20); --bd3: rgba(220,220,220,.30);
+              --accent: #D8D8D8; --accent2: #aaaaaa; --accent3: rgba(220,220,220,.08); --accent-glow: rgba(220,220,220,.3);
+              --gold: #C8A060; --gold2: #a8813e; --gold3: rgba(200,160,96,.12); --gold-glow: rgba(200,160,96,.42);
+              --text: #F8F8F8; --text2: #AAAAAA; --muted: #252525; --muted2: #666666;
+              --glass: rgba(255,255,255,.04); --glass-border: rgba(255,255,255,.18); --glass-hover: rgba(255,255,255,.10);
+              --card-bg: linear-gradient(145deg, rgba(16,16,16,.97) 0%, rgba(8,8,8,.95) 100%);
+              --nav-bg: rgba(5, 5, 5, 0.97);
+              --green: #6EE7B7; --red: #F87171;
+              --team-glow-color: #D8D8D8;
+            }
+
+            /* blood-moon — Near black with deep crimson + pale silver */
+            [data-theme='blood-moon'] {
+              --bg: #050203; --s1: #0C0406; --s2: #14070A; --s3: #1C0B0E;
+              --bd: rgba(200,0,30,.15); --bd2: rgba(200,0,30,.25); --bd3: rgba(200,0,30,.38);
+              --accent: #CC001E; --accent2: #a00018; --accent3: rgba(200,0,30,.1); --accent-glow: rgba(200,0,30,.58);
+              --gold: #E8C8C8; --gold2: #c8a0a0; --gold3: rgba(232,200,200,.1); --gold-glow: rgba(232,200,200,.3);
+              --text: #FFE8E8; --text2: #FFAAAA; --muted: #2a0608; --muted2: #884444;
+              --glass: rgba(200,0,30,.06); --glass-border: rgba(200,0,30,.40); --glass-hover: rgba(200,0,30,.18);
+              --card-bg: linear-gradient(145deg, rgba(22,4,6,.97) 0%, rgba(12,2,4,.95) 100%);
+              --nav-bg: rgba(5, 2, 3, 0.97);
+              --green: #FF9999; --red: #CC001E;
+              --team-glow-color: #CC001E;
             }
 
 
