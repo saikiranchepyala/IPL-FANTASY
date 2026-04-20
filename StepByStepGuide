@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.3.0
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.4.0
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,7 +152,13 @@ Step 12 — Before match day
 
 Step 13 — After the toss (~30 min before first ball)
 
-  Click "TOSS DONE — FETCH XI"
+  Toggle the "Auto every" dropdown to your preferred interval (e.g. 30 sec)
+  and click the "OFF ⏸" button next to it to switch it to "ON 🟢". 
+  This will auto-poll for Playing XI updates and match status.
+    → If successful, you'll get a "✅ Playing XI auto-detected!" toast.
+    → Auto-refresh will continue to update stats once the match starts.
+
+  Alternative: Click "TOSS DONE — FETCH XI"
     → App polls CricAPI every 20 seconds, up to 20 attempts (~7 min)
     → You'll get a "✅ Playing XI confirmed for both teams!" toast if successful
     → No further action needed once confirmed

@@ -1,12 +1,29 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.3.0"
+version: "3.4.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.3 — Project Intelligence
+# IPL Fantasy League v3.4 — Project Intelligence
+
+## 🔧 Auto-Refresh UI & Logic Hardening (v3.4.0 — April 20, 2026)
+
+**Root cause**: The auto-refresh (AR) system had three points of failure: (1) `startAR` strictly required `match.locked`, blocking its use for pre-match XI fetching; (2) `adminToggleAR` showed a success toast even if the guard failed; (3) the `arInterval` global variable was shadowed by the HTML `<select id="arInterval">`, causing the button to always evaluate as "ON" (green) in the template.
+
+### Fix 1 — Persistent Interval Selection
+Added `window.arStoredSecs` (default 30) to track the admin's chosen interval. The `<select>` now has an `onchange` handler that updates this global, and the template uses it to set the `selected` attribute. This prevents the dropdown from resetting to "30 sec" on every re-render.
+
+### Fix 2 — Relaxed startAR Guard
+Removed `!match.locked` from the `startAR` guard. Auto-refresh can now be started anytime a `liveMatchId` is present. This is critical for admins who want to auto-poll for Playing XI updates before the match officially "starts" in the app.
+
+### Fix 3 — Shadowing & Toggle Logic
+Renamed the global timer variable from `arInterval` to `arIntervalTimer`. This resolves the conflict with the DOM element ID. `adminToggleAR` was also updated to check the return value of `startAR()` before showing the "ON 🟢" toast, ensuring feedback is accurate.
+
+**Rule**: Always use `arIntervalTimer` for the JavaScript `setInterval` handle. The ID `arInterval` is reserved for the DOM element.
+
+---
 
 ## 🔧 Stats Grid + Ghost Cleanup Migration Fix (v3.3.0 — April 20, 2026)
 
