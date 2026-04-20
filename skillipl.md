@@ -1,12 +1,26 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.2.0"
+version: "3.3.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.2 — Project Intelligence
+# IPL Fantasy League v3.3 — Project Intelligence
+
+## 🔧 Stats Grid + Ghost Cleanup Migration Fix (v3.3.0 — April 20, 2026)
+
+**Root cause**: The v2.9.6 `bat_*` field prefix migration (`autoFetchStats` now sets `bat_runs`, `bat_balls`, `bat_4s`, `bat_6s`, `bat_notOut` and explicitly nullifies the legacy `runs`, `balls`, `fours`, `sixes`, `notOut` fields to clear old corruption) was not fully propagated to two display/cleanup functions.
+
+### Fix 1 — `renderStatsGrid` out-badge shows for all auto-fetched batters (MEDIUM — wrong display)
+`s.batted && !s.notOut` — with `s.notOut = null` (explicitly nullified by `autoFetchStats`), `!null = true`, so the out-badge `†` was shown for ALL batters including not-outs. Fix: `!(s.bat_notOut ?? s.notOut)`.
+
+### Fix 2 — `cleanupGhostStats` falsely marks auto-fetched batters as ghosts (MEDIUM — wrong points)
+`s.batted && (s.balls === 0 || s.balls == null)` — `s.balls = null` after migration, so every auto-fetched batter with `bat_balls=N, balls=null` was detected as a "ghost" and had `batted` set to `false`. Fix: `const _effectiveBalls = s.bat_balls ?? s.balls ?? 0; if (s.batted && _effectiveBalls === 0)`. Same fix applied to the runs ghost check.
+
+**Rule**: Anywhere stats are read for display or cleanup, use the `bat_*` field with fallback: `s.bat_balls ?? s.balls`, `s.bat_runs ?? s.runs`, `s.bat_notOut ?? s.notOut`. `calcPoints()` already does this correctly. Every other stat consumer must follow the same pattern.
+
+
 
 ## 🔧 Manual XI Paste Panel + xiReady Fix (v3.2.0 — April 18, 2026)
 

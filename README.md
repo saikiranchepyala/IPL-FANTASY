@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.2.0** — [Changelog](#-changelog)
+**Current version: v3.3.0** — [Changelog](#-changelog)
 
 ---
 
@@ -255,6 +255,10 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.3.0 — April 20, 2026
+- Fixed `renderStatsGrid` out-badge `†` showing for all auto-fetched batters (including not-outs) — `!s.notOut` is always `true` after `autoFetchStats` sets `notOut: null`; fix uses `bat_notOut ?? notOut`
+- Fixed `cleanupGhostStats` falsely marking valid auto-fetched batters as "ghosts" — `s.balls=null` after migration to `bat_balls` prefix; fix uses `bat_balls ?? balls` for both ghost checks
 
 ### v3.2.0 — April 18, 2026
 - Added "XI not loading from API?" paste panel in Current Match tab — paste both Playing XIs when CricAPI fails post-toss

@@ -5889,19 +5889,22 @@
         pool.forEach((p) => {
           const s = playerStats[p.name];
           if (!s) return;
+          // Use bat_balls (new prefixed field) with fallback to legacy balls field.
+          // autoFetchStats explicitly sets balls=null and bat_balls=N — checking only
+          // s.balls would falsely detect all auto-fetched batters as ghosts.
+          const _effectiveBalls = s.bat_balls ?? s.balls ?? 0;
           // Ghost: batted=true but 0 balls faced — was never actually a batter
-          if (s.batted && (s.balls === 0 || s.balls == null)) {
+          if (s.batted && _effectiveBalls === 0) {
             s.batted = false;
             statsUpdate[`stats.${p.name}.batted`] = false;
             cleaned++;
           }
           // Ghost: runs > 0 but 0 balls — runs conceded bled into batting runs
-          if (
-            (s.runs || 0) > 0 &&
-            (s.balls === 0 || s.balls == null) &&
-            !s.batted
-          ) {
+          const _effectiveRuns = s.bat_runs ?? s.runs ?? 0;
+          if (_effectiveRuns > 0 && _effectiveBalls === 0 && !s.batted) {
+            s.bat_runs = 0;
             s.runs = 0;
+            statsUpdate[`stats.${p.name}.bat_runs`] = 0;
             statsUpdate[`stats.${p.name}.runs`] = 0;
             cleaned++;
           }
@@ -6167,7 +6170,7 @@
                 pts = calcPoints(s);
               const pStatus = (currentMatch.playerStatus || {})[p.name] || "";
               const outBadge =
-                s.batted && !s.notOut ? '<span class="out-badge">†</span>' : "";
+                s.batted && !(s.bat_notOut ?? s.notOut) ? '<span class="out-badge">†</span>' : "";
               const stagger = Math.min(i * 15, 120);
               const _adRoleClass =
                 {
