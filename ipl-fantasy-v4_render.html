@@ -790,7 +790,7 @@
       }
 
       // Auto-refresh
-      let arInterval = null,
+      let arIntervalTimer = null,
         arTimer = null,
         arSecs = 0;
       window.arStoredSecs = 30;
@@ -4933,8 +4933,8 @@
             <option value="120" ${window.arStoredSecs === 120 ? "selected" : ""}>2 min</option>
             <option value="300" ${window.arStoredSecs === 300 ? "selected" : ""}>5 min</option>
           </select>
-          <button class="ar-btn ${arInterval ? "ar-on" : "ar-off"}" onclick="adminToggleAR()">${arInterval ? "🟢 ON" : "⏸ OFF"}</button>
-          ${arInterval ? `<span class="ar-cd" id="arCountdown">next in ${arSecs}s</span>` : ""}
+          <button class="ar-btn ${arIntervalTimer ? "ar-on" : "ar-off"}" onclick="adminToggleAR()">${arIntervalTimer ? "🟢 ON" : "⏸ OFF"}</button>
+          ${arIntervalTimer ? `<span class="ar-cd" id="arCountdown">next in ${arSecs}s</span>` : ""}
         </div>
       </div>
     </div>
@@ -7818,7 +7818,7 @@
         }
         stopPreMatchXIWatcher();
         toast("Match started! 🚀 Teams locked and leaderboard live.");
-        if (!arInterval) {
+        if (!arIntervalTimer) {
           const secs = parseInt(
             document.getElementById("arInterval")?.value || "30",
           );
@@ -7884,7 +7884,7 @@
 
       // Stats tab handlers:
       window.adminToggleAR = function () {
-        if (arInterval) {
+        if (arIntervalTimer) {
           stopAR();
           toast("Auto-refresh stopped");
         } else {
@@ -9289,7 +9289,7 @@
         stopAR();
         arSecs = secs;
         autoFetchStats();
-        arInterval = setInterval(() => {
+        arIntervalTimer = setInterval(() => {
           autoFetchStats();
           arSecs = secs;
         }, secs * 1000);
@@ -9301,9 +9301,9 @@
         return true;
       }
       function stopAR() {
-        if (arInterval) {
-          clearInterval(arInterval);
-          arInterval = null;
+        if (arIntervalTimer) {
+          clearInterval(arIntervalTimer);
+          arIntervalTimer = null;
         }
         if (arTimer) {
           clearInterval(arTimer);
