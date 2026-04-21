@@ -8,20 +8,20 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 
 # IPL Fantasy League v3.5 — Project Intelligence
 
-## 🎨 6 New Dark Themes (v3.5.0 — April 20, 2026)
+## 🔒 Security Hardening — Firestore Rules (v3.5.0 — April 20, 2026)
 
-Added 6 new themes to the Pro Skins picker, each fully distinct from the existing 16:
+**Goal**: Transition from "Public/Open" database rules to "Hardened" rules to prevent accidental or malicious data loss while maintaining the "Zero-Auth" (PIN-based) user flow.
 
-| Theme | Key | Accent | Vibe |
-|---|---|---|---|
-| **Cyberpunk** | `neon-cyberpunk` | Hot pink `#FF0099` + cyan `#00FFCC` | Blade Runner neon on void black |
-| **Synthwave** | `synthwave` | Pink `#FF58C6` + yellow `#FFDE0A` | 80s retro retrowave purple |
-| **Abyss** | `abyss` | Teal `#00E5CC` + electric `#7DF9FF` | Deep ocean bioluminescent |
-| **Matrix** | `matrix` | Green `#00FF41` | Hacker terminal on void black |
-| **Carbon** | `carbon-phantom` | Silver `#D8D8D8` + bronze `#C8A060` | Carbon fiber monochrome sleek |
-| **Blood Moon** | `blood-moon` | Crimson `#CC001E` + pale silver | Near-black horror red |
+### Fix 1 — Deletion Protection
+Modified rules to `allow delete: if false;` for the `matches` collection. This prevents any user (or script) from wiping out match history via the client-side SDK.
 
-**Rule**: Each theme must define all CSS variables: `--bg`, `--s1–s3`, `--bd/2/3`, `--accent/2/3/glow`, `--gold/2/3/glow`, `--text/2`, `--muted/2`, `--glass`, `--glass-border`, `--glass-hover`, `--card-bg`, `--nav-bg`, `--green`, `--red`, `--team-glow-color`. Missing any causes rendering fallback to the default Midnight theme values.
+### Fix 2 — Structural Integrity (Field Validation)
+Implemented an `affectedKeys()` check on match updates. Only known application fields (`teams`, `stats`, `locked`, `revealed`, etc.) can be modified. This prevents a malicious actor from injecting garbage data or large blobs into the match documents.
+
+### Fix 3 — Rules documentation in StepByStepGuide
+Updated the guide to provide these hardened rules as the default setup for new deployments.
+
+**Rule**: Never revert Firestore rules to `if true`. Any new match-level field must be added to the `hasAny([...])` list in the security rules or the write will fail.
 
 ---
 
