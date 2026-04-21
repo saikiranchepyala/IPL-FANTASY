@@ -9019,7 +9019,7 @@
           // Extract current active players from scorecard (Live Batsmen & Bowler)
           // Skip for ended matches — currentBatsmen/currentBowler were already cleared in the match-end update
           if (sc.length > 0 && !ended) {
-            // Pick the ACTIVE innings — not blindly sc[last].
+            // Pick the ACTIVE innings — not blindly sc[last]. 
             // CricAPI doesn't guarantee innings order. Strategy:
             // 1. Find innings with fractional overs (mid-over = definitely in progress)
             // 2. Else find innings with overs < 20 and has not-out batsmen (incomplete innings)
@@ -9035,7 +9035,7 @@
                 const batBalls = bats.reduce((s, b) => s + (b.b || 0), 0);
                 return bowlOv || (batBalls / 6);
               };
-              const hasNotOut = (inn) => (inn.batting || []).some(b =>
+              const hasNotOut = (inn) => (inn.batting || []).some(b => 
                 !b.dismissal || ["not out", "retired hurt", "retired ill"].includes((b.dismissal || "").toLowerCase())
               );
               // Priority 1: fractional overs (mid-over, definitely live)
@@ -9053,7 +9053,7 @@
                 });
                 // Take the one with the MOST overs bowled (latest in the match)
                 if (incomplete.length > 0) {
-                  curInn = incomplete.reduce((best, inn) =>
+                  curInn = incomplete.reduce((best, inn) => 
                     getOvers(inn) > getOvers(best) ? inn : best, incomplete[0]);
                 } else {
                   // Priority 3: the innings with the highest overs that isn't complete at 20.0

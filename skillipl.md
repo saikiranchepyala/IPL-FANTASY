@@ -1,12 +1,24 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.0"
+version: "3.5.1"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
 # IPL Fantasy League v3.5 — Project Intelligence
+
+## 🏏 Current Innings Detection Fix (v3.5.1 — April 20, 2026)
+
+**Bug**: `autoFetchStats` used `sc[sc.length - 1]` to pick the "current" innings for live batsmen/bowler display. CricAPI doesn't guarantee innings order in the `scorecard[]` array — when the 1st innings was last in the array, the app showed stale 1st-innings batsmen (e.g. SRH's Abhishek Sharma/Ishan Kishan) while DC was actually batting in the 2nd innings.
+
+**Fix**: Smart innings picker that finds the truly active innings:
+1. **Priority 1**: Innings with fractional overs (mid-over = definitely in progress).
+2. **Priority 2**: Incomplete innings (< 20 overs) with not-out batsmen — take the one with most overs bowled.
+3. **Priority 3**: Any innings under 20 overs.
+4. **Fallback**: Last innings in array (original behavior).
+
+---
 
 ## 🔒 Security Hardening — Firestore Rules (v3.5.0 — April 20, 2026)
 
@@ -16,29 +28,12 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 Modified rules to `allow delete: if false;` for the `matches` collection. This prevents any user (or script) from wiping out match history via the client-side SDK.
 
 ### Fix 2 — Structural Integrity (Field Validation)
-Implemented an `affectedKeys()` check on match updates. Only known application fields can be modified. This prevents a malicious actor from injecting garbage data or large blobs into the match documents.
-
-**Complete field allowlist** (updated April 21, 2026 — was missing 13 fields that caused "insufficient permission" errors during auto-fetch and admin save):
-`teams`, `stats`, `locked`, `revealed`, `xiReady`, `matchStatus`, `score`, `matchEnded`, `players`, `playerStatus`, `currentBatsmen`, `currentBowler`, `matchResult`, `abandoned`, `finalized`, `tossResult`, `overSummaries`, `label`, `liveMatchId`, `t1`, `t2`, `t1img`, `t2img`, `isIPL`, `matchType`, `matchNum`, `fantasyEnabled`, `createdAt`.
-
-**No-op write fix** (April 21, 2026): Added `affectedKeys().size() == 0 ||` guard. The AR poller intentionally sends writes even when stats haven't changed (due to a mutation-tracking limitation where `playerStats` is a live reference to `activeMatchData.stats`). When all values are identical to Firestore, `affectedKeys()` returns an empty set and `hasAny()` returns `false`, causing spurious "insufficient permission" errors on every poll cycle where the score hasn't changed.
+Implemented an `affectedKeys()` check on match updates. Only known application fields (`teams`, `stats`, `locked`, `revealed`, etc.) can be modified. This prevents a malicious actor from injecting garbage data or large blobs into the match documents.
 
 ### Fix 3 — Rules documentation in StepByStepGuide
 Updated the guide to provide these hardened rules as the default setup for new deployments.
 
 **Rule**: Never revert Firestore rules to `if true`. Any new match-level field must be added to the `hasAny([...])` list in the security rules or the write will fail.
-
----
-
-## 🏏 Current Innings Detection Fix (v3.5.1 — April 21, 2026)
-
-**Bug**: `autoFetchStats` used `sc[sc.length - 1]` to pick the "current" innings for live batsmen/bowler display. CricAPI doesn't guarantee innings order in the `scorecard[]` array — when the 1st innings was last in the array, the app showed stale 1st-innings batsmen (e.g. SRH's Abhishek Sharma/Ishan Kishan) while DC was actually batting in the 2nd innings.
-
-**Fix**: Smart innings picker that finds the truly active innings:
-1. **Priority 1**: Innings with fractional overs (mid-over = definitely in progress)
-2. **Priority 2**: Incomplete innings (< 20 overs) with not-out batsmen — take the one with most overs bowled
-3. **Priority 3**: Any innings under 20 overs
-4. **Fallback**: Last innings in array (original behavior)
 
 ---
 
