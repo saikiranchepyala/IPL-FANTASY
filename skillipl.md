@@ -21,6 +21,8 @@ Implemented an `affectedKeys()` check on match updates. Only known application f
 **Complete field allowlist** (updated April 21, 2026 — was missing 13 fields that caused "insufficient permission" errors during auto-fetch and admin save):
 `teams`, `stats`, `locked`, `revealed`, `xiReady`, `matchStatus`, `score`, `matchEnded`, `players`, `playerStatus`, `currentBatsmen`, `currentBowler`, `matchResult`, `abandoned`, `finalized`, `tossResult`, `overSummaries`, `label`, `liveMatchId`, `t1`, `t2`, `t1img`, `t2img`, `isIPL`, `matchType`, `matchNum`, `fantasyEnabled`, `createdAt`.
 
+**No-op write fix** (April 21, 2026): Added `affectedKeys().size() == 0 ||` guard. The AR poller intentionally sends writes even when stats haven't changed (due to a mutation-tracking limitation where `playerStats` is a live reference to `activeMatchData.stats`). When all values are identical to Firestore, `affectedKeys()` returns an empty set and `hasAny()` returns `false`, causing spurious "insufficient permission" errors on every poll cycle where the score hasn't changed.
+
 ### Fix 3 — Rules documentation in StepByStepGuide
 Updated the guide to provide these hardened rules as the default setup for new deployments.
 
