@@ -9437,6 +9437,12 @@
             <button class="theme-option" data-theme="blood-moon">
               <span class="theme-swatch" style="background:linear-gradient(135deg,#050203,#CC001E,#E8C8C8)"></span>Blood Moon
             </button>
+            <button class="theme-option" data-theme="void-amber">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#050300,#FFAA00,#FF6600)"></span>Void Amber
+            </button>
+            <button class="theme-option" data-theme="neon-dusk">
+              <span class="theme-swatch" style="background:linear-gradient(135deg,#08040A,#FF6B35,#FF3E8A)"></span>Neon Dusk
+            </button>
           </div>
         </div>
       </div>
@@ -10001,6 +10007,35 @@
               --green: #FF9999; --red: #CC001E;
               --team-glow-color: #CC001E;
             }
+
+            /* void-amber — Pure black with honey-whisky amber glow */
+            [data-theme='void-amber'] {
+              --bg: #050300; --s1: #0C0800; --s2: #160E00; --s3: #1E1500;
+              --bd: rgba(255,170,0,.13); --bd2: rgba(255,170,0,.22); --bd3: rgba(255,170,0,.34);
+              --accent: #FFAA00; --accent2: #CC8800; --accent3: rgba(255,170,0,.1); --accent-glow: rgba(255,170,0,.55);
+              --gold: #FF6600; --gold2: #CC5200; --gold3: rgba(255,102,0,.1); --gold-glow: rgba(255,102,0,.45);
+              --text: #FFF8E8; --text2: #FFCC88; --muted: #2A1C00; --muted2: #886622;
+              --glass: rgba(255,170,0,.05); --glass-border: rgba(255,170,0,.34); --glass-hover: rgba(255,170,0,.14);
+              --card-bg: linear-gradient(145deg, rgba(20,12,0,.97) 0%, rgba(10,6,0,.95) 100%);
+              --nav-bg: rgba(5, 3, 0, 0.97);
+              --green: #AAEE44; --red: #FF4422;
+              --team-glow-color: #FFAA00;
+            }
+
+            /* neon-dusk — Near-black with sunset orange bleeding into hot rose */
+            [data-theme='neon-dusk'] {
+              --bg: #08040A; --s1: #100618; --s2: #180A24; --s3: #200E30;
+              --bd: rgba(255,107,53,.14); --bd2: rgba(255,107,53,.24); --bd3: rgba(255,107,53,.36);
+              --accent: #FF6B35; --accent2: #DD5520; --accent3: rgba(255,107,53,.1); --accent-glow: rgba(255,107,53,.52);
+              --gold: #FF3E8A; --gold2: #DD2268; --gold3: rgba(255,62,138,.1); --gold-glow: rgba(255,62,138,.45);
+              --text: #FFF0E8; --text2: #FFCCAA; --muted: #280C08; --muted2: #AA4422;
+              --glass: rgba(255,107,53,.06); --glass-border: rgba(255,107,53,.36); --glass-hover: rgba(255,107,53,.16);
+              --card-bg: linear-gradient(145deg, rgba(22,8,16,.97) 0%, rgba(12,4,10,.95) 100%);
+              --nav-bg: rgba(8, 4, 10, 0.97);
+              --green: #88FFAA; --red: #FF3E8A;
+              --team-glow-color: #FF6B35;
+            }
+
 
             /* ── NEW ANIMATIONS ── */
             @keyframes glowPulse {
@@ -16621,6 +16656,8 @@
           "neon-cyberpunk",
           "synthwave",
           "blood-moon",
+          "void-amber",
+          "neon-dusk",
         ];
 
         /* ── Apply theme: Task 4 logic ── */
