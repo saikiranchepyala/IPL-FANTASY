@@ -9019,7 +9019,49 @@
           // Extract current active players from scorecard (Live Batsmen & Bowler)
           // Skip for ended matches — currentBatsmen/currentBowler were already cleared in the match-end update
           if (sc.length > 0 && !ended) {
-            const curInn = sc[sc.length - 1];
+            // Pick the ACTIVE innings — not blindly sc[last].
+            // CricAPI doesn't guarantee innings order. Strategy:
+            // 1. Find innings with fractional overs (mid-over = definitely in progress)
+            // 2. Else find innings with overs < 20 and has not-out batsmen (incomplete innings)
+            // 3. Fallback to last innings in array
+            let curInn = sc[sc.length - 1]; // default fallback
+            if (sc.length > 1) {
+              const getOvers = (inn) => {
+                const bats = inn.batting || [];
+                const bowls = inn.bowling || [];
+                // Sum bowler overs for total innings overs
+                const bowlOv = bowls.reduce((s, bw) => s + (bw.o || bw.ov || 0), 0);
+                // Fallback: count batters who faced balls
+                const batBalls = bats.reduce((s, b) => s + (b.b || 0), 0);
+                return bowlOv || (batBalls / 6);
+              };
+              const hasNotOut = (inn) => (inn.batting || []).some(b =>
+                !b.dismissal || ["not out", "retired hurt", "retired ill"].includes((b.dismissal || "").toLowerCase())
+              );
+              // Priority 1: fractional overs (mid-over, definitely live)
+              const midOver = sc.find(inn => {
+                const ov = getOvers(inn);
+                return ov > 0 && ov % 1 !== 0;
+              });
+              if (midOver) {
+                curInn = midOver;
+              } else {
+                // Priority 2: incomplete innings (< 20 overs in T20) with not-out batsmen
+                const incomplete = sc.filter(inn => {
+                  const ov = getOvers(inn);
+                  return ov > 0 && ov < 20 && hasNotOut(inn);
+                });
+                // Take the one with the MOST overs bowled (latest in the match)
+                if (incomplete.length > 0) {
+                  curInn = incomplete.reduce((best, inn) =>
+                    getOvers(inn) > getOvers(best) ? inn : best, incomplete[0]);
+                } else {
+                  // Priority 3: the innings with the highest overs that isn't complete at 20.0
+                  const notDone = sc.filter(inn => getOvers(inn) < 20 && getOvers(inn) > 0);
+                  if (notDone.length > 0) curInn = notDone[notDone.length - 1];
+                }
+              }
+            }
             if (curInn.batting) {
               const notOutBatsmen = curInn.batting.filter(
                 (b) =>

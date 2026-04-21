@@ -30,6 +30,18 @@ Updated the guide to provide these hardened rules as the default setup for new d
 
 ---
 
+## 🏏 Current Innings Detection Fix (v3.5.1 — April 21, 2026)
+
+**Bug**: `autoFetchStats` used `sc[sc.length - 1]` to pick the "current" innings for live batsmen/bowler display. CricAPI doesn't guarantee innings order in the `scorecard[]` array — when the 1st innings was last in the array, the app showed stale 1st-innings batsmen (e.g. SRH's Abhishek Sharma/Ishan Kishan) while DC was actually batting in the 2nd innings.
+
+**Fix**: Smart innings picker that finds the truly active innings:
+1. **Priority 1**: Innings with fractional overs (mid-over = definitely in progress)
+2. **Priority 2**: Incomplete innings (< 20 overs) with not-out batsmen — take the one with most overs bowled
+3. **Priority 3**: Any innings under 20 overs
+4. **Fallback**: Last innings in array (original behavior)
+
+---
+
 ## 🔧 Auto-Refresh Button Fix (v3.4.0 — April 20, 2026)
 
 **Root cause**: Three compounding issues combined to leave the button permanently stuck at "⏸ OFF":
