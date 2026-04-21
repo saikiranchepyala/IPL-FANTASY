@@ -54,7 +54,22 @@ In Firestore → **Rules** tab, replace everything with:
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+    match /matches/{matchId} {
+      allow read: if true;
+      allow delete: if false;
+      allow create: if true;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                 'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                 'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                 'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                 't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                 'matchNum', 'fantasyEnabled', 'createdAt']);
+    }
+    match /meta/{docId} {
+      allow read, write: if true;
+    }
+    match /season/{docId} {
       allow read, write: if true;
     }
   }
@@ -257,7 +272,8 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ## 📋 Changelog
 
 ### v3.5.0 — April 20, 2026
-- Added 6 new dark themes: **Cyberpunk** (neon pink + cyan), **Synthwave** (80s retro purple/yellow), **Abyss** (deep ocean teal), **Matrix** (hacker green), **Carbon** (monochrome silver), **Blood Moon** (crimson red)
+- Added 5 new dark themes: **Cyberpunk** (neon pink + cyan), **Synthwave** (80s retro purple/yellow), **Matrix** (hacker green), **Blood Moon** (crimson red), **Absinthe** (acid lime + deep violet)
+- Removed Electric Ahmedabad, Abyss, Carbon Phantom themes
 
 ### v3.4.0 — April 20, 2026
 - Fixed auto-refresh button stuck at "⏸ OFF" in Player Stats tab — three compounding issues:

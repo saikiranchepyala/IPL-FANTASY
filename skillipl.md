@@ -16,7 +16,10 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 Modified rules to `allow delete: if false;` for the `matches` collection. This prevents any user (or script) from wiping out match history via the client-side SDK.
 
 ### Fix 2 — Structural Integrity (Field Validation)
-Implemented an `affectedKeys()` check on match updates. Only known application fields (`teams`, `stats`, `locked`, `revealed`, etc.) can be modified. This prevents a malicious actor from injecting garbage data or large blobs into the match documents.
+Implemented an `affectedKeys()` check on match updates. Only known application fields can be modified. This prevents a malicious actor from injecting garbage data or large blobs into the match documents.
+
+**Complete field allowlist** (updated April 21, 2026 — was missing 13 fields that caused "insufficient permission" errors during auto-fetch and admin save):
+`teams`, `stats`, `locked`, `revealed`, `xiReady`, `matchStatus`, `score`, `matchEnded`, `players`, `playerStatus`, `currentBatsmen`, `currentBowler`, `matchResult`, `abandoned`, `finalized`, `tossResult`, `overSummaries`, `label`, `liveMatchId`, `t1`, `t2`, `t1img`, `t2img`, `isIPL`, `matchType`, `matchNum`, `fantasyEnabled`, `createdAt`.
 
 ### Fix 3 — Rules documentation in StepByStepGuide
 Updated the guide to provide these hardened rules as the default setup for new deployments.

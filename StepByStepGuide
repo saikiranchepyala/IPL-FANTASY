@@ -34,7 +34,12 @@ Step 3 — Fix the security rules
           allow delete: if false; 
           allow create: if true;
           allow update: if request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus', 'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen', 'currentBowler', 'matchResult', 'abandoned', 'finalized']);
+            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                     'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                     'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                     'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                     't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                     'matchNum', 'fantasyEnabled', 'createdAt']);
         }
         match /meta/{docId} {
           allow read, write: if true;
