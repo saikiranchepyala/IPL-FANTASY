@@ -10,7 +10,7 @@ stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (
 
 ## ✈️ Overseas Player Roster Update (v3.5.3 — April 21, 2026)
 
-**Update**: Added **Dilshan Madushanka** (SRH) to the `OVERSEAS_PLAYERS` set. 
+**Update**: Added **Dilshan Madushanka** (and variant spelling **Madhushanka**) to the `OVERSEAS_PLAYERS` set. 
 - Ensures he is correctly tagged as "FOREIGN" in the UI.
 - Correctly counts toward the 4-player overseas cap for team submissions.
 
