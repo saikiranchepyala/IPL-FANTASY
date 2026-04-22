@@ -1,12 +1,24 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.5"
+version: "3.5.6"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.5.5 — Project Intelligence
+# IPL Fantasy League v3.5.6 — Project Intelligence
+
+## 🔧 Final Stability Refinements (v3.5.6 — April 22, 2026)
+
+**Goal**: Final polish to ensure data consistency and protection against low-probability edge cases identified in the audit.
+
+### Fix 1 — CSV Formula Injection Prevention
+Added a `safeCSV()` helper to the `exportCSV` function. It detects values starting with formula triggers (`=`, `+`, `-`, `@`) and prefixes them with a single quote (`'`). This prevents malicious member names or match labels from executing formulas in Excel/Google Sheets.
+
+### Fix 2 — Hardened Booster State Logic
+Refined `applyBoosterChoice` and `removeBooster` to follow a "Write-then-Mutate" pattern. Local state (`localTeam.booster`, `allMembers`) and UI (`_refreshBoosterDock()`) are now only updated *after* the Firestore write confirms success. If a write fails, the UI reverts to the last known-good state.
+
+---
 
 ## 🛡️  XSS & Security Hardening (v3.5.5 — April 22, 2026)
 

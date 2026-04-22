@@ -503,8 +503,10 @@
           if (!mems[session.name]) mems[session.name] = {};
           mems[session.name].boosters = inv;
           await setDoc(doc(db, "meta", "members"), mems);
+
+          // Update local state ONLY after successful DB writes
           allMembers = mems;
-          // Patch in-memory so a subsequent lock-in sees prevBooster = null
+          localTeam.booster = null; // actually clear it locally now
           if (activeMatches[activeMid]?.teams) {
             activeMatches[activeMid].teams[session.name] = {
               ...(activeMatches[activeMid].teams[session.name] || {}),
@@ -512,9 +514,14 @@
             };
             allTeams = getTeams(activeMid);
           }
+          _refreshBoosterDock();
           toast("Booster removed ✓");
         } catch (e) {
-          toast("Removed locally — save failed: " + e.message, "err");
+          console.warn(e);
+          // Revert staged change in dock if save fails
+          localTeam.booster = savedBooster;
+          _refreshBoosterDock();
+          toast("Failed to remove booster: " + e.message, "err");
         }
       };
 
@@ -609,10 +616,10 @@
           if (!mems[session.name]) mems[session.name] = {};
           mems[session.name].boosters = inv;
           await setDoc(doc(db, "meta", "members"), mems);
-          allMembers = mems;
 
-          // Patch in-memory allTeams so a subsequent lock-in doesn't see a stale
-          // prevBooster and double-charge the inventory
+          // Update local state ONLY after successful DB writes
+          allMembers = mems;
+          localTeam.booster = newBooster;
           if (activeMatches[activeMid]?.teams) {
             activeMatches[activeMid].teams[session.name] = {
               ...(activeMatches[activeMid].teams[session.name] || {}),
@@ -620,15 +627,14 @@
             };
             allTeams = getTeams(activeMid);
           }
-
-          toast("⚡ Booster saved! ✅", "ok");
+          _refreshBoosterDock();
+          toast("⚡ Booster applied & saved ✓");
         } catch (e) {
-          // Staged locally — lock-in will act as fallback to persist it
-          toast(
-            "⚡ Booster staged — auto-save failed, lock in team to save: " +
-              e.message,
-            "err",
-          );
+          console.warn(e);
+          // Revert staged change in dock if save fails
+          localTeam.booster = savedBooster;
+          _refreshBoosterDock();
+          toast("Failed to apply booster: " + e.message, "err");
         }
       };
 
@@ -6910,19 +6916,26 @@
           );
           return clean?.label || matchVariants[0]?.label || id;
         });
-        const header = ["Rank", "Name", "Team", ...allMatchLabels, "Total"];
+        // Fix: Prevent CSV Formula Injection by quoting values starting with =, +, -, @
+        const safeCSV = (v) => {
+          const s = String(v || "");
+          if (["=", "+", "-", "@"].includes(s[0])) return `'${s}`;
+          return s;
+        };
+
+        const header = ["Rank", "Name", "Team", ...allMatchLabels, "Total"].map(safeCSV);
         const lines = [
           header.join(","),
           ...rows.map((r, i) =>
             [
-              i + 1,
-              r.name,
-              r.teamName,
+              safeCSV(i + 1),
+              safeCSV(r.name),
+              safeCSV(r.teamName),
               ...allMatchIds.map((id) => {
                 const m = r.matches.find((x) => x.matchId === id);
-                return m ? m.pts : "";
+                return safeCSV(m ? m.pts : "");
               }),
-              r.total,
+              safeCSV(r.total),
             ].join(","),
           ),
         ];
