@@ -1,12 +1,20 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.2"
+version: "3.5.3"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
 # IPL Fantasy League v3.5 — Project Intelligence
+
+## ✈️ Overseas Player Roster Update (v3.5.3 — April 21, 2026)
+
+**Update**: Added **Dilshan Madushanka** (SRH) to the `OVERSEAS_PLAYERS` set. 
+- Ensures he is correctly tagged as "FOREIGN" in the UI.
+- Correctly counts toward the 4-player overseas cap for team submissions.
+
+---
 
 ## 🔧 Post-Audit Fixes (v3.5.2 — April 21, 2026)
 
