@@ -805,7 +805,7 @@
         _cricApiCalls++;
         try {
           localStorage.setItem(_QUOTA_KEY, String(_cricApiCalls));
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
         if (_cricApiCalls === 1800)
           toast("⚠️ CricAPI quota: 1800/2000 calls used today", "err");
         if (_cricApiCalls >= 2000) {
@@ -855,13 +855,13 @@
               memberSelectedMatchId,
             }),
           );
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
       }
       function sessionClear() {
         try {
           localStorage.removeItem("ipl_session");
           sessionStorage.removeItem("_adminOk");
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
         session = { name: null, isAdmin: false };
         stopAR();
         // Unsubscribe all Firestore listeners so stale data doesn't bleed into next session
@@ -870,23 +870,23 @@
             window._unsubGame();
             window._unsubGame = null;
           }
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
         try {
           if (window._unsubMembers) {
             window._unsubMembers();
             window._unsubMembers = null;
           }
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
         try {
           if (window._unsubSeason) {
             window._unsubSeason();
             window._unsubSeason = null;
           }
-        } catch (e) {}
+        } catch (e) { console.warn(e); }
         Object.keys(matchUnsubs).forEach((mid) => {
           try {
             matchUnsubs[mid]();
-          } catch (e) {}
+          } catch (e) { console.warn(e); }
         });
         matchUnsubs = {};
         prevScores = {};
@@ -1008,7 +1008,7 @@
                 memberSelectedMatchId = saved.memberSelectedMatchId;
               // refreshView() will be called once the meta/game snapshot fires
             }
-          } catch (e) {}
+          } catch (e) { console.warn(e); }
 
           if (urlJoinCode) showScreen("join");
           else if (session.name || session.isAdmin)
@@ -1996,7 +1996,7 @@
     <div class="mtc-header">
       <div>
         <div class="mtc-match">${match.label || "Current Match"}</div>
-        <div class="mtc-teamname">${allMembers[session.name]?.teamName || session.name}</div>
+        <div class="mtc-teamname">${escHtml(allMembers[session.name]?.teamName || session.name)}</div>
       </div>
       <div class="mtc-summary">
         <div class="mtc-stat"><span>${totalCR}</span><em>CR used</em></div>
@@ -2460,7 +2460,7 @@
         overlay.innerHTML = `
           <div class="history-modal">
             <div class="hm-header">
-              <div class="hm-title">${memberName}'s Pitch</div>
+              <div class="hm-title">${escHtml(memberName)}'s Pitch</div>
               <button class="hm-close" onclick="this.closest('.history-overlay').remove()">×</button>
             </div>
             <div class="hm-body">
@@ -2501,7 +2501,7 @@
   <div class="winner-banner">
     <div class="wb-confetti">🎊</div>
     <div class="wb-label">MATCH FINAL</div>
-    <div class="wb-winner">🏆 ${ranked[0]?.name} wins!</div>
+    <div class="wb-winner">🏆 ${escHtml(ranked[0]?.name)} wins!</div>
     <div class="wb-score">${ranked[0]?.total} pts</div>
     <div class="wb-match">${match.label || ""}</div>
   </div>`
@@ -2571,10 +2571,10 @@
       <div class="lb-body">
         <div class="lb-name-row">
           <div>
-            <div class="lb-name">${r.name}${r.name === highlightName ? ' <span class="you">YOU</span>' : ""}</div>
-            <div class="lb-tname">${r.teamName}${bstPill}</div>
+            <div class="lb-name">${escHtml(r.name)}${r.name === highlightName ? ' <span class="you">YOU</span>' : ""}</div>
+            <div class="lb-tname">${escHtml(r.teamName)}${bstPill}</div>
           </div>
-          ${r.team.players?.length ? `<button class="lb-pitch-btn" onclick="window._viewMemberPitch('${mid}','${safeN}')" title="View ${r.name}'s pitch">🏟</button>` : ""}
+          ${r.team.players?.length ? `<button class="lb-pitch-btn" onclick="window._viewMemberPitch('${mid}','${safeN}')" title="View ${escAttr(r.name)}'s pitch">🏟</button>` : ""}
         </div>
         <div class="lb-chips">
           ${
@@ -2701,8 +2701,8 @@
     <div class="sc-card ${r.name === session.name ? "sc-me" : ""} ${i === 0 ? "sc-first" : ""}">
       <div class="sc-rank">${medals[i] || "#" + (i + 1)}</div>
       <div class="sc-body">
-        <div class="sc-name">${r.name}${r.name === session.name ? ' <span class="you">YOU</span>' : ""}</div>
-        <div class="sc-tname">${r.teamName}</div>
+        <div class="sc-name">${escHtml(r.name)}${r.name === session.name ? ' <span class="you">YOU</span>' : ""}</div>
+        <div class="sc-tname">${escHtml(r.teamName)}</div>
         <div class="sc-history">
           ${
             r.matches.length
@@ -2750,7 +2750,7 @@
             .map(
               (r) => `
           <tr class="${r.name === session.name ? "tr-me" : ""}">
-            <td class="td-name">${r.name}</td>
+            <td class="td-name">${escHtml(r.name)}</td>
             ${matchCols
               .map((id) => {
                 const m = r.matches.find((x) => x.matchId === id);
@@ -3456,9 +3456,10 @@
                 return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bd)">
                 <span style="font-size:18px;width:24px;text-align:center">${_msvMedals[i] || "#" + (i + 1)}</span>
                 <div style="flex:1">
-                  <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700">${r.name} ${bstBadge}</div>
-                  <div style="font-size:11px;color:var(--muted2)">${r.teamName}</div>
+                  <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700">${escHtml(r.name)} ${bstBadge}</div>
+                  <div style="font-size:11px;color:var(--muted2)">${escHtml(r.teamName)}</div>
                 </div>
+
                 <div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--gold)">${r.total}<span style="font-size:11px;opacity:.6;margin-left:2px">pts</span></div>
               </div>`;
               })
@@ -4896,9 +4897,10 @@
             const rowHtml = (r) => `
               <div class="mrow">
                 <span class="mrow-s ${r.submitted ? "s-yes" : "s-no"}" style="font-size:13px;min-width:14px">${r.submitted ? "✓" : "–"}</span>
-                <span class="mrow-n">${r.name}</span>
+                <span class="mrow-n">${escHtml(r.name)}</span>
                 ${revealed ? `<span class="mrow-p">${r.total}pts</span>` : ""}
               </div>`;
+
             let html = submitted.map(rowHtml).join("");
             if (submitted.length && pending.length) {
               html += `<div class="subs-divider">Pending</div>`;
@@ -6137,7 +6139,7 @@
             ? Object.entries(allMembers)
                 .map(
                   ([name, m]) => `
-        <div class="mrow"><span class="mrow-n">${name}</span><span class="mrow-s s-yes">${m.teamName || "–"}</span></div>`,
+        <div class="mrow"><span class="mrow-n">${escHtml(name)}</span><span class="mrow-s s-yes">${escHtml(m.teamName || "–")}</span></div>`,
                 )
                 .join("")
             : '<p class="muted">No members yet.</p>'
@@ -9429,7 +9431,8 @@
       ${isAdmin && !adminInPlayerMode ? '<span class="admin-badge">⚙️ Admin Panel</span>' : adminInPlayerMode ? '<span class="admin-badge">Admin · Player Mode</span>' : '<span class="nav-hi">🏏 My League</span>'}
     </div>
     <div class="nav-r">
-      ${session.name && !session.isAdmin ? `<span class="nav-u">👤 ${session.name}</span>` : ""}
+    ${session.name && !session.isAdmin ? `<span class="nav-u">👤 ${escHtml(session.name)}</span>` : ""}
+
       ${
         session.isAdmin && metaGame.adminProfile?.name
           ? `
@@ -9676,7 +9679,7 @@
         const p = n.split(", ");
         return p.length > 2 ? p.slice(0, -1).join(", ") : n;
       }
-      // Escapes user-controlled strings for safe use inside HTML attributes (title, data-*, etc.)
+      // Escapes user-controlled strings for safe use inside HTML attributes AND innerHTML contexts.
       function escAttr(s) {
         return (s || "")
           .replace(/&/g, "&amp;")
@@ -9685,6 +9688,8 @@
           .replace(/</g, "&lt;")
           .replace(/>/g, "&gt;");
       }
+      const escHtml = escAttr; // alias — same escaping covers both contexts
+
       function toast(msg, type = "ok") {
         let t = document.getElementById("toast");
         t.textContent = msg;
@@ -9701,7 +9706,7 @@
       }
       function showError(m) {
         document.getElementById("app").innerHTML =
-          `<div class="screen-center"><p style="color:#ef4444">${m}</p></div>`;
+          `<div class="screen-center"><p style="color:#ef4444">${escHtml(m)}</p></div>`;
       }
     </script>
     <style>
@@ -16739,7 +16744,7 @@
             localStorage.setItem("ipl_theme_v2026", themeName);
             // Keep legacy key for compatibility with existing components
             localStorage.setItem("ipl-theme", themeName);
-          } catch (e) {}
+          } catch (e) { console.warn(e); }
 
           syncActiveState(themeName);
         };
@@ -16810,7 +16815,7 @@
               localStorage.getItem("ipl_theme_v2026") ||
               localStorage.getItem("ipl-theme") ||
               "";
-          } catch (e) {}
+          } catch (e) { console.warn(e); }
           var theme = VALID_THEMES.includes(saved) ? saved : "midnight";
           document.documentElement.setAttribute("data-theme", theme);
           document.body.setAttribute("data-theme", theme);
