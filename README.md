@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.0** — [Changelog](#-changelog)
+**Current version: v3.5.2** — [Changelog](#-changelog)
 
 ---
 
@@ -16,10 +16,11 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 - **Toss reveal mechanic** — all teams hidden until admin locks the match at first ball
 - **Auto Playing XI detection** — background watcher polls CricAPI after toss; manual paste fallback if API is slow
 - **Live points** — auto-fetches scorecard from CricketData.org API every ~5 minutes
+- **Smart Innings Picker** — automatically detects the live batting team even if CricAPI data is out of order
 - **Impact Sub support** — automatic status flip when sub enters
 - **Season leaderboard** — cumulative points table with match-by-match breakdown and booster badges
 - **Pitch overlay** — member-by-member XI visualisation from the leaderboard
-- **CSV export** — download full season table as a spreadsheet
+- **CSV export** — download full season table as a spreadsheet with prioritized "clean" match labels
 - **Admin panel** — manage matches, load players, control reveal timing, finalize points
 - **Join via link** — admin generates a join code; members tap link and register
 - **Works on mobile** — fully responsive, designed for phone use during a match
@@ -46,26 +47,20 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 3. In the left sidebar → **Build → Firestore Database** → **Create database**
 4. Choose **Start in test mode** → region: `asia-south1` → **Enable**
 
-### Step 2 — Firestore Security Rules
+### Step 2 — Firestore Security Rules (Hardened)
 
-In Firestore → **Rules** tab, replace everything with:
+In Firestore → **Rules** tab, replace everything with these hardened rules to prevent unauthorized deletions and structural corruption:
 
-```
+```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /matches/{matchId} {
       allow read: if true;
-      allow delete: if false;
+      allow delete: if false; 
       allow create: if true;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().size() == 0
-        || request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                   'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                   'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                   'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                   't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                   'matchNum', 'fantasyEnabled', 'createdAt']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus', 'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen', 'currentBowler', 'matchResult', 'abandoned', 'finalized']);
     }
     match /meta/{docId} {
       allow read, write: if true;
@@ -240,7 +235,7 @@ This app uses a **paid CricketData.org API plan** for reliable scorecard access 
 - **Catches/stumpings/run-outs** — CricAPI doesn't always populate these reliably; may need manual entry after the match.
 - **Auto-refresh requires admin tab open** — the live poller only runs while the admin panel is open. Keep your screen active during the match.
 - **Playing XI between toss and first ball** — CricAPI occasionally doesn't return XI status in this window. Use the "XI not loading from API?" paste panel in the Current Match tab to mark players manually.
-- **Firestore rules are open** — fine for a private friend group; not suitable for a public app.
+- **Security** — Basic Firestore rules are included to prevent unauthorized deletions and structural corruption. This is sufficient for a private friend group but not for a public application.
 - **Playoffs/finals** — boosters are disabled for playoff matches (Qualifiers, Eliminators, Final).
 - **Firestore free tier** — 50,000 reads / 20,000 writes per day — more than sufficient for a 25-member group across a full season.
 
@@ -272,62 +267,39 @@ Firebase will connect to your live Firestore instance, so any changes made local
 
 ## 📋 Changelog
 
+### v3.5.2 — April 21, 2026
+- Fixed `abandonMatch` field migration gap: duck-penalty protection now correctly handles `bat_runs` and `bat_notOut` fields
+- Enhanced `exportCSV` label lookup: prioritizes clean match labels (ignoring labels with rain/abandoned emojis) for spreadsheet headers
+
+### v3.5.1 — April 21, 2026
+- Implemented **Smart Innings Picker** for live display: app now detects the truly active innings based on fractional overs and incomplete status, fixing the bug where stale 1st-innings batsmen were shown during the 2nd innings
+
 ### v3.5.0 — April 20, 2026
-- Added 5 new dark themes: **Cyberpunk** (neon pink + cyan), **Synthwave** (80s retro purple/yellow), **Matrix** (hacker green), **Blood Moon** (crimson red), **Absinthe** (acid lime + deep violet)
+- **Hardened Security Rules**: Implemented Firestore rules to prevent unauthorized match deletions and restrict updates to specific application fields
+- Added 5 new dark themes: **Cyberpunk**, **Synthwave**, **Matrix**, **Blood Moon**, **Absinthe**
 - Removed Electric Ahmedabad, Abyss, Carbon Phantom themes
 
 ### v3.4.0 — April 20, 2026
-- Fixed auto-refresh button stuck at "⏸ OFF" in Player Stats tab — three compounding issues:
-  - Renamed `arInterval` → `arIntervalTimer` to avoid clashing with `<select id="arInterval">` DOM element
-  - Added `window.arStoredSecs` persistence so the dropdown doesn't reset to "30 sec" on every re-render
-  - Removed overly strict `liveMatchId` guard from `startAR` — was blocking the timer from starting; `autoFetchStats` already handles missing `liveMatchId` gracefully
-- Auto-refresh can now start before match lock (pre-match XI polling supported)
+- Fixed auto-refresh button stuck at "⏸ OFF" in Player Stats tab — resolved variable shadowing and added interval persistence (`window.arStoredSecs`)
+- Relaxed `startAR` guards: auto-refresh can now start before match lock (pre-match XI polling supported)
 
 ### v3.3.0 — April 20, 2026
-- Fixed `renderStatsGrid` out-badge `†` showing for all auto-fetched batters (including not-outs) — `!s.notOut` is always `true` after `autoFetchStats` sets `notOut: null`; fix uses `bat_notOut ?? notOut`
-- Fixed `cleanupGhostStats` falsely marking valid auto-fetched batters as "ghosts" — `s.balls=null` after migration to `bat_balls` prefix; fix uses `bat_balls ?? balls` for both ghost checks
+- Fixed `renderStatsGrid` out-badge and `cleanupGhostStats` falsely flagging auto-fetched batters due to `null` field migration
 
 ### v3.2.0 — April 18, 2026
-- Added "XI not loading from API?" paste panel in Current Match tab — paste both Playing XIs when CricAPI fails post-toss
-- Fixed `parseSquadList` to set `xiReady: true` when 22+ playing players confirmed (existing + batch counted together)
-- Impact players (prefixed "Impact:") correctly excluded from xiReady threshold
+- Added "XI not loading from API?" paste panel in Current Match tab
+- Fixed `parseSquadList` to set `xiReady: true` when 22+ players confirmed
 
 ### v3.1.0 — April 18, 2026
-- Fixed final-over stats freeze: grace poll pattern gives CricAPI 60s after match end to commit final scorecard
-- `_handleMatchEnd(activeMid)` stops recurring interval then fires one final poll; uses `_arGracePollMid` cancellation key
+- Fixed final-over stats freeze with a 60s grace-poll pattern
 
 ### v3.0.0 — April 18, 2026
-- Fixed admin Season Leaderboard "X Matches ▾" toggle breaking for members with apostrophes in their name
-- Full smoke test + API endpoint verification — all CricAPI endpoints confirmed live, `fantasyEnabled: true` for all IPL 2026 matches
-- IPL 2026 series ID confirmed correct against live API
+- Full smoke test + API endpoint verification for IPL 2026
+- Fixed "X Matches ▾" toggle for member names with apostrophes
 
 ### v2.9.9 — April 18, 2026
-- Restored `getTeamColor` function deleted by external model (was causing silent Loading screen freeze)
-- Added try-catch to `showScreen` rAF so a crashed render never leaves the app invisible
-- Fixed `?.split("vs")[n]` crash in score bar and booster dock
-- Fixed `parseScorecardText` catch block not resetting `skipNextRefresh` after failed saves
-- Fixed `prevScores` and `_pvMatchCache` not being cleared on logout (stale memory on iOS)
-
-### v2.9.8 — April 2026
-- Fixed RRR/balls-left showing "NEED N OFF 120 BALLS" from over 10 onwards
-- Fixed final-over stats never reaching Firestore (live reference deep-compare bug)
-- Fixed AR poller running indefinitely after match end when no changes detected
-- Fixed CricAPI empty scorecard race condition after `matchEnded: true` (8s retry)
-
-### v2.9.7 — April 2026
-- Fixed GT vs KKR score swap from CricAPI multi-team inning labels
-
-### v2.9.6 — April 2026
-- Fixed batting/bowling field collision causing ghost points
-- Fixed fuzzy name matcher causing wrong player attribution
-- Fixed captain `(c)` tag causing all-rounder bowling rows to be skipped in manual scorecard paste
-
-### v2.9.3 — April 2026
-- Boosters now auto-save immediately for members who already locked in their team
-
-### v2.9 — March 2026
-- Booster system launched: Triple (3×), Double (2×), Team (2×) per season
-- Booster dock, overlay, inventory management, privacy/reveal system
+- Restored `getTeamColor` and added try-catch to `showScreen` rAF for boot stability
+- Fixed several crash/leak points in scorecard parsing and session clearing
 
 ---
 
