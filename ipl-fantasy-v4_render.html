@@ -2590,7 +2590,10 @@
                 // Only team booster applies per-player chip
                 if (booster?.type === "team" && pTeamKey === booster.target)
                   pts *= 2;
-                const _no = stats[p]?.batted && stats[p]?.notOut ? "*" : "";
+                const _no =
+                  stats[p]?.batted && (stats[p]?.bat_notOut ?? stats[p]?.notOut)
+                    ? "*"
+                    : "";
                 const bstBadge = bstChipForPlayer(
                   booster,
                   p,
@@ -6995,18 +6998,26 @@
             if (!playerStats[p]) playerStats[p] = {};
             let val = parseFloat(i.value) || 0;
             // Normalize overs notation (e.g. 3.7 -> 4.1)
-            if (f === "overs" && (val % 1).toFixed(1) >= 0.6) {
+            const _fval = (val % 1).toFixed(1);
+            if (f === "overs" && parseFloat(_fval) >= 0.6) {
               const full = Math.floor(val);
               const b = Math.round((val - full) * 10);
               val = full + Math.floor(b / 6) + (b % 6) / 10;
             }
             playerStats[p][f] = val;
+
+            // Fix 2: Nullify legacy fields if writing prefixed ones
+            if (f === "bat_runs") playerStats[p].runs = null;
+            if (f === "bat_balls") playerStats[p].balls = null;
+            if (f === "bat_4s") playerStats[p].fours = null;
+            if (f === "bat_6s") playerStats[p].sixes = null;
           });
           document.querySelectorAll(".sic").forEach((c) => {
             const p = c.dataset.p,
               f = c.dataset.f;
             if (!playerStats[p]) playerStats[p] = {};
             playerStats[p][f] = c.checked;
+            if (f === "bat_notOut") playerStats[p].notOut = null;
           });
           // Clear API eco so calcPoints recalculates from manually entered overs/runs
           Object.keys(playerStats).forEach((p) => {
@@ -7040,11 +7051,12 @@
           btn.onclick = async () => {
             const p = btn.dataset.p;
             const data = { ...(playerStats[p] || {}) };
-            document.querySelectorAll(`.si[data-p="${p}"]`).forEach((i) => {
+            document.querySelectorAll(`.si[data-p="${CSS.escape(p)}"]`).forEach((i) => {
               let val = parseFloat(i.value) || 0;
               const f = i.dataset.f;
               // Normalize overs notation (e.g. 3.7 -> 4.1)
-              if (f === "overs" && (val % 1).toFixed(1) >= 0.6) {
+              const _fval = (val % 1).toFixed(1);
+              if (f === "overs" && parseFloat(_fval) >= 0.6) {
                 const full = Math.floor(val);
                 const b = Math.round((val - full) * 10);
                 val = full + Math.floor(b / 6) + (b % 6) / 10;
@@ -7057,7 +7069,7 @@
             if (data.bat_4s !== undefined) data.fours = null;
             if (data.bat_6s !== undefined) data.sixes = null;
             if (data.bat_notOut !== undefined) data.notOut = null;
-            document.querySelectorAll(`.sic[data-p="${p}"]`).forEach((c) => {
+            document.querySelectorAll(`.sic[data-p="${CSS.escape(p)}"]`).forEach((c) => {
               data[c.dataset.f] = c.checked;
             });
             delete data.eco; // force calcPoints to recalculate from entered overs/runs
@@ -8945,8 +8957,8 @@
                   ? Math.round((bstats.runsConceded / bstats.overs) * 10) / 10
                   : null;
 
-            // Sanity check: T20 overs cannot exceed 4
-            const validatedOvers = bstats.overs > 4 ? 0 : bstats.overs;
+            // Sanity check: Only cap if we are 100% sure it's a T20
+            const validatedOvers = (_isIPL && bstats.overs > 4) ? 0 : bstats.overs;
 
             playerStats[n] = {
               ...(playerStats[n] || {}),

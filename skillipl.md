@@ -1,12 +1,31 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.3"
+version: "3.5.4"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
 # IPL Fantasy League v3.5 — Project Intelligence
+
+## 🔧 Post-Audit Stability Hardening (v3.5.4 — April 21, 2026)
+
+**Fix 1 — Not-out Asterisk Display**
+Fixed the leaderboard to correctly show the `*` for not-out batsmen by checking the `bat_notOut` field with a legacy fallback (`stats[p]?.bat_notOut ?? stats[p]?.notOut`).
+
+**Fix 2 — "Save All" Legacy Cleanup**
+Updated `saveAllStats` to nullify legacy fields (`runs`, `balls`, etc.) when writing the new prefixed fields (`bat_runs`, etc.). This prevents double-counting in points calculations and keeps the database clean.
+
+**Fix 3 — Relaxed Bowling Overs Guard**
+Relaxed the strict 4-over cap in `autoFetchStats` to support non-T20 matches (ODIs, etc.) while keeping the cap for IPL matches specifically.
+
+**Fix 4 — Robust DOM Queries**
+Wrapped player names in `CSS.escape()` for all manual save and availability toggle query selectors to prevent crashes when player names contain special characters (like quotes or brackets).
+
+**Fix 5 — Dead Code Cleanup**
+Removed unused imports and variables (`deleteDoc`, `xiRetryCount`, `matchHistory`) to keep the bundle lean.
+
+---
 
 ## ✈️ Overseas Player Roster Update (v3.5.3 — April 21, 2026)
 
