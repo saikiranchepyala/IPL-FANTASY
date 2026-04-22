@@ -6807,9 +6807,14 @@
           const firestoreUpdate = {};
           Object.keys(rawStats).forEach((p) => {
             const s = { ...rawStats[p] };
-            if (s.batted && (s.runs || 0) === 0 && !s.notOut) {
+            const effectiveRuns = s.bat_runs ?? s.runs ?? 0;
+            const effectiveNotOut = s.bat_notOut ?? s.notOut ?? false;
+
+            if (s.batted && effectiveRuns === 0 && !effectiveNotOut) {
               s.notOut = true;
+              s.bat_notOut = true;
               firestoreUpdate[`stats.${p}.notOut`] = true;
+              firestoreUpdate[`stats.${p}.bat_notOut`] = true;
             }
             stats[p] = s;
           });
@@ -6886,10 +6891,17 @@
           ),
         ];
         const allMatchLabels = allMatchIds.map((id) => {
-          const m = rows
+          const matchVariants = rows
             .flatMap((r) => r.matches)
-            .find((x) => x.matchId === id);
-          return m?.label || id;
+            .filter((x) => x.matchId === id);
+          // Prioritize labels without the rain emoji or "Abandoned" text
+          const clean = matchVariants.find(
+            (m) =>
+              m.label &&
+              !m.label.includes("🌧️") &&
+              !m.label.toLowerCase().includes("abandoned"),
+          );
+          return clean?.label || matchVariants[0]?.label || id;
         });
         const header = ["Rank", "Name", "Team", ...allMatchLabels, "Total"];
         const lines = [

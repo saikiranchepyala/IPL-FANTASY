@@ -1,14 +1,25 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.1"
+version: "3.5.2"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
 # IPL Fantasy League v3.5 — Project Intelligence
 
-## 🏏 Current Innings Detection Fix (v3.5.1 — April 20, 2026)
+## 🔧 Post-Audit Fixes (v3.5.2 — April 21, 2026)
+
+**Fix 1 — `abandonMatch` field migration gap**
+Updated `abandonMatch` to use effective runs and not-out values (`bat_runs ?? runs`). Previously, the duck-penalty protection logic used only legacy fields, causing it to trigger for every auto-fetched player (whose legacy fields are null) but only write to the legacy `notOut` field (which `calcPoints` ignores in favor of `bat_notOut`). Fixed to read/write both.
+
+**Fix 2 — `exportCSV` label prioritization**
+Enhanced the CSV export logic to find the "cleanest" label for a match ID across all member records. It now filters out labels containing the rain emoji (🌧️) or "Abandoned" text when choosing the header label for a match column.
+
+---
+
+## 🏏 Current Innings Detection Fix (v3.5.1 — April 21, 2026)
+
 
 **Bug**: `autoFetchStats` used `sc[sc.length - 1]` to pick the "current" innings for live batsmen/bowler display. CricAPI doesn't guarantee innings order in the `scorecard[]` array — when the 1st innings was last in the array, the app showed stale 1st-innings batsmen (e.g. SRH's Abhishek Sharma/Ishan Kishan) while DC was actually batting in the 2nd innings.
 
