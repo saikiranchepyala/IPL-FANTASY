@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.6** — [Changelog](#-changelog)
+**Current version: v3.5.7** — [Changelog](#-changelog)
 
 ---
 
@@ -275,6 +275,14 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.5.7 — April 23, 2026
+- **Audit-Driven Stability**: Refactored match finalization to use atomic `writeBatch` transactions.
+- **Boot Crash Prevention**: Fixed TDZ ReferenceError in `showError` content rendering.
+- **Booster Protection**: Switched to dot-path `updateDoc` to prevent concurrent booster data loss.
+- **Super Over Scoring**: Fixed logical OR for `notOut` status and per-innings overs capping.
+- **Security**: Extended XSS escaping to scorecard player names.
+- **Squad Update**: Added Krish Bhagat (MI) to the player credits pool.
 
 ### v3.5.6 — April 22, 2026
 - **CSV Formula Injection Fix**: Added `safeCSV` prefixing to prevent formula execution in exported spreadsheets.

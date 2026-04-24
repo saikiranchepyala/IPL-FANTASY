@@ -1,24 +1,45 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.6"
+version: "3.5.7"
 project: ipl-ssmb-fantasy-league
-stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
+stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern GlassMorphism)"
 ---
 
-# IPL Fantasy League v3.5.6 — Project Intelligence
+# IPL Fantasy League v3.5.7 — Project Intelligence
+
+## 🛡️ Critical Audit & Integration Hardening (v3.5.7 — April 23, 2026)
+
+**Goal**: Address high-severity issues identified in the full system audit, ensuring atomic data operations and preventing silent application crashes.
+
+### Fix 1 — Atomic Match Finalization
+Replaced sequential `setDoc` and `updateDoc` calls with Firestore `writeBatch`. This ensures that updating the **Season Totals** and marking a match as **Finalized** (or Abandoned) happens in a single atomic transaction. Prevents data inconsistency where points are added but the match isn't locked, which could lead to double-counting.
+
+### Fix 2 — TDZ (Temporal Dead Zone) Crash Prevention
+Fixed a critical boot-time bug in `showError()`. The function was attempting to use `escHtml` (a `const` variable) before its declaration in the script's execution flow. In environments with network or Firebase initialization errors, this caused a secondary `ReferenceError`, resulting in a blank screen instead of a helpful error message. Switched to `escAttr` (a hoisted function declaration).
+
+### Fix 3 — Booster Data Loss Prevention
+Refactored booster management to use `updateDoc` with **dot-path notation** (e.g., `updateDoc(doc, { "memberName.boosters": inv })`). Previous versions used `setDoc` on the entire `meta/members` document, which created a race condition: if two users applied boosters simultaneously, the second write would silently overwrite the first user's update.
+
+### Fix 4 — Multi-Innings & Super Over Scoring
+- **notOut Persistence**: Changed the `notOut` assignment to use logical OR (`||=`). If a player is "not out" in any innings (main or super over), they now correctly retain that status for bonus points.
+- **Per-Innings Overs Cap**: The 4-over bowling cap for IPL matches is now applied to individual innings records rather than the accumulated total. This prevents bowlers who bowl in both the main match and a super over from having their entire wickets/overs record zeroed out for "exceeding" 4 overs.
+- **Over Summaries Merging**: `overSummaries` are now concatenated across all innings instead of being overwritten by the last innings in the array.
+
+### Fix 5 — CricAPI Quota & Global Sync
+- **Midnight Reset**: The `_QUOTA_KEY` is now dynamically generated inside `_trackApiCall`, ensuring the 2000-call limit resets correctly at midnight without requiring a page refresh.
+- **Off-by-one Fix**: Corrected the quota logic to allow exactly 2000 calls per day.
+
+### Fix 6 — XSS & Template Security
+Extended XSS protection to the scorecard player rows. Player names (`b.name`, `bowler.name`) are now escaped within template literals to prevent injection via API data.
+
+### 🏏 Squad Update
+Added **Krish Bhagat** (Mumbai Indians) to the `PLAYER_CREDITS` pool with a base value of 7 credits.
+
+---
 
 ## 🔧 Final Stability Refinements (v3.5.6 — April 22, 2026)
 
-**Goal**: Final polish to ensure data consistency and protection against low-probability edge cases identified in the audit.
-
-### Fix 1 — CSV Formula Injection Prevention
-Added a `safeCSV()` helper to the `exportCSV` function. It detects values starting with formula triggers (`=`, `+`, `-`, `@`) and prefixes them with a single quote (`'`). This prevents malicious member names or match labels from executing formulas in Excel/Google Sheets.
-
-### Fix 2 — Hardened Booster State Logic
-Refined `applyBoosterChoice` and `removeBooster` to follow a "Write-then-Mutate" pattern. Local state (`localTeam.booster`, `allMembers`) and UI (`_refreshBoosterDock()`) are now only updated *after* the Firestore write confirms success. If a write fails, the UI reverts to the last known-good state.
-
----
 
 ## 🛡️  XSS & Security Hardening (v3.5.5 — April 22, 2026)
 
