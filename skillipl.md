@@ -1,12 +1,28 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.7"
+version: "3.5.8"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern GlassMorphism)"
 ---
 
-# IPL Fantasy League v3.5.7 — Project Intelligence
+# IPL Fantasy League v3.5.8 — Project Intelligence
+
+## 🏏 Match Info Tab + Live Fetch Crash Fix (v3.5.8 — April 24, 2026)
+
+### Feature — Match Info Standalone Tab
+Added a 6th tab "Match Info" that renders a live batting/bowling scorecard directly from Firestore `match.stats`. Key behaviours:
+- **Visibility**: Tab is conditionally rendered via `isCurrentMatchLive()` (`locked && !finalized && !matchEnded`). Appears when match starts, disappears when it ends — handled in all 7 render/refresh paths including admin `outerHTML` tab-bar swap.
+- **Position**: Between "My Team" and "Live Scores" in member view; between "Current Match" and "Player Stats" in admin view.
+- **URL params**: `?tab=scoreboard` (member) / `?atab=scoreboard` (admin).
+- **Master Pulse**: RAF-based DOM patch targets `#lsv-body` after every successful auto-fetch write, updating the scorecard without a full re-render.
+- **Content**: Per-innings batting table (sorted desc by runs, current batsmen highlighted with pulsing green dot) and bowling table (current bowler highlighted), with horizontal scroll on mobile.
+- **Score colour fix**: `hsc-big-score` inside `.lsv-wrap` forced to `var(--white)` — the team primary colour was unreadable on dark backgrounds for several team palettes.
+
+### Fix — `_isIPL is not defined` Crash During Live Fetch
+`autoFetchStats` referenced `_isIPL` (a local variable scoped only to `renderPlayerGrid`) in the bowling overs guard introduced in v3.5.4. Fixed by replacing with `_matchType === "ipl"` (module-scope variable). This caused a `ReferenceError` toast on every fetch during live IPL matches.
+
+---
 
 ## 🛡️ Critical Audit & Integration Hardening (v3.5.7 — April 23, 2026)
 

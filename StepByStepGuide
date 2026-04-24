@@ -228,8 +228,10 @@ PHASE 7 — MEMBER FLOW (EACH MATCH)
   3. Choose Captain (2×) and Vice-Captain (1.5×)
   4. Optionally apply a Booster from the booster dock (see Booster section below)
   5. Tap "LOCK IN MY TEAM"
-  6. After admin clicks START MATCH → Live Scores tab for the leaderboard
-  7. Season Table tab for cumulative standings
+  6. After admin clicks START MATCH → Match Info tab appears automatically
+     showing the live batting/bowling scorecard (disappears when match ends)
+  7. Live Scores tab for the leaderboard and pitch view
+  8. Season Table tab for cumulative standings
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.7** — [Changelog](#-changelog)
+**Current version: v3.5.8** — [Changelog](#-changelog)
 
 ---
 
@@ -25,6 +25,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 - **Join via link** — admin generates a join code; members tap link and register
 - **Works on mobile** — fully responsive, designed for phone use during a match
 - **XSS Hardened** — all user inputs are sanitized before rendering
+- **Match Info tab** — live batting/bowling scorecard tab that appears automatically when a match is in progress and disappears when it ends; visible to both members and admins
 
 ---
 
@@ -275,6 +276,11 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.5.8 — April 24, 2026
+- **Match Info tab**: Added a standalone 6th tab showing the live batting and bowling scorecard. Tab is conditionally rendered — it only appears when a match is live (`locked && !finalized && !matchEnded`) and disappears automatically when the match ends. Positioned between "My Team" and "Live Scores" in member view, and between "Current Match" and "Player Stats" in admin view. RAF-based DOM patch keeps it in sync with every auto-fetch cycle.
+- **Live score fix**: Fixed a crash (`ReferenceError: _isIPL is not defined`) that occurred during live stat fetches. The v3.5.4 bowling-overs guard incorrectly used a local variable `_isIPL` from `renderPlayerGrid`; replaced with the module-scope `_matchType === "ipl"` check.
+- **Score readability**: Team score in the Match Info innings header now renders in white instead of the team's primary colour, which was unreadable on dark backgrounds for several team palettes.
 
 ### v3.5.7 — April 23, 2026
 - **Audit-Driven Stability**: Refactored match finalization to use atomic `writeBatch` transactions.

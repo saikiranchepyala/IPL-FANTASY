@@ -848,7 +848,9 @@
       let curRole = "ALL",
         curSearch = ""; // persist across member re-renders
       let xiRetryCount = 0; // reset on each match switch
-      let _pitchViewActive = false; // toggles between leaderboard and pitch view
+      let _liveView = "leaderboard"; // "leaderboard" | "pitch" | "stats" — live tab sub-view
+      let _lsvGen = 0; // increments on tab switch; cancels stale RAF scoreboard patches
+      let _pitchViewActive = false; // kept for backward compat; mirrors _liveView === "pitch"
       let _pvPrevPts = {}; // previous pts snapshot for delta animation
       let _pvMatchCache = {}; // matchId → match data for member pitch overlay
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
@@ -1157,25 +1159,25 @@
         if (session.isAdmin && !session.name) {
           const adminContent = document.getElementById("admin-content");
           if (adminContent) {
-            const t =
-              new URLSearchParams(location.search).get("atab") || "match";
-            // Keep match-selector in sync with activeMatchIds (safe: renderMatchSelectorTabs
-            // always returns a stable wrapper div so outerHTML swap never orphans the anchor)
+            let t = new URLSearchParams(location.search).get("atab") || "match";
+            // If on scoreboard but match is no longer live, redirect to match tab
+            if (t === "scoreboard" && !isCurrentMatchLive()) {
+              t = "match";
+              history.replaceState({}, "", `${location.pathname}?atab=match`);
+            }
+            // Keep match-selector in sync with activeMatchIds
             const mst = document.getElementById("admin-match-selector");
             if (mst) mst.outerHTML = renderMatchSelectorTabs();
-            // Only swap content — leave view-tabs and match-selector untouched
-            document.querySelectorAll("#admin-body .vtab").forEach((b) => {
-              const m = b
-                .getAttribute("onclick")
-                ?.match(/switchAdminTab\('(\w+)'\)/);
-              b.classList.toggle("active", !!(m && m[1] === t));
-            });
+            // Re-render tab bar so Live Stats button appears/disappears with match state
+            const adminTabsEl = document.querySelector("#admin-body .view-tabs");
+            if (adminTabsEl) adminTabsEl.outerHTML = _adminTabsHtml(t);
             let body = "";
-            if (t === "match") body = renderAdminMatch();
-            if (t === "stats") body = renderAdminStats();
-            if (t === "season") body = renderAdminSeason();
-            if (t === "league") body = renderAdminLeague();
-            if (t === "history") body = renderHistoryTab();
+            if (t === "match")      body = renderAdminMatch();
+            if (t === "stats")      body = renderAdminStats();
+            if (t === "season")     body = renderAdminSeason();
+            if (t === "league")     body = renderAdminLeague();
+            if (t === "history")    body = renderHistoryTab();
+            if (t === "scoreboard") body = renderLiveScoreboardTab();
             adminContent.innerHTML = body;
             // Force layout flush for touch hit-box rebuild — skip on pointer devices
             // where it only causes a synchronous reflow with no benefit
@@ -1196,22 +1198,21 @@
         } else if (session.name) {
           const memberBody = document.getElementById("member-body");
           if (memberBody) {
-            const t = new URLSearchParams(location.search).get("tab") || "team";
-            const tabs = `<div class="view-tabs">
-        <button class="vtab ${t === "team" ? "active" : ""}" onclick="switchTab('team')">My Team</button>
-        <button class="vtab ${t === "live" ? "active" : ""}" onclick="switchTab('live')">Live Scores</button>
-        <button class="vtab ${t === "stats" ? "active" : ""}" onclick="switchTab('stats')">Player Stats</button>
-        <button class="vtab ${t === "season" ? "active" : ""}" onclick="switchTab('season')">Season Table</button>
-        <button class="vtab ${t === "history" ? "active" : ""}" onclick="switchTab('history')">History</button>
-      </div>`;
+            let t = new URLSearchParams(location.search).get("tab") || "team";
+            // If on scoreboard but match is no longer live, redirect to team tab
+            if (t === "scoreboard" && !isCurrentMatchLive()) {
+              t = "team";
+              history.replaceState({}, "", `${location.pathname}?tab=team`);
+            }
             let body = "";
-            if (t === "team") body = renderTeamTab();
-            if (t === "live") body = renderLiveTab();
-            if (t === "stats") body = renderMemberStatsTab();
-            if (t === "season") body = renderSeasonTab();
-            if (t === "history") body = renderHistoryTab();
+            if (t === "team")        body = renderTeamTab();
+            if (t === "live")        body = renderLiveTab();
+            if (t === "stats")       body = renderMemberStatsTab();
+            if (t === "season")      body = renderSeasonTab();
+            if (t === "history")     body = renderHistoryTab();
+            if (t === "scoreboard")  body = renderLiveScoreboardTab();
             memberBody.innerHTML =
-              tabs +
+              _memberTabsHtml(t) +
               renderMemberMatchSelector() +
               `<div id="tab-body" class="tab-content">${body}</div>`;
             requestAnimationFrame(() => {
@@ -1620,37 +1621,22 @@
         // Preserve current tab (e.g. history) unless it's a detail view; default to team
         const _curTab =
           new URLSearchParams(location.search).get("tab") || "team";
-        const _safeTab = [
-          "team",
-          "live",
-          "stats",
-          "season",
-          "history",
-        ].includes(_curTab)
-          ? _curTab
-          : "team";
+        const _validTabs = ["team","live","stats","season","history",
+          ...(isCurrentMatchLive() ? ["scoreboard"] : [])];
+        const _safeTab = _validTabs.includes(_curTab) ? _curTab : "team";
         history.replaceState({}, "", `${location.pathname}?tab=${_safeTab}`);
         const memberBody = document.getElementById("member-body");
         if (memberBody) {
-          const _tabBody =
-            _safeTab === "history"
-              ? renderHistoryTab()
-              : _safeTab === "live"
-                ? renderLiveTab()
-                : _safeTab === "stats"
-                  ? renderMemberStatsTab()
-                  : _safeTab === "season"
-                    ? renderSeasonTab()
-                    : renderTeamTab();
-          const tabs = `<div class="view-tabs">
-      <button class="vtab${_safeTab === "team" ? " active" : ""}" onclick="switchTab('team')">My Team</button>
-      <button class="vtab${_safeTab === "live" ? " active" : ""}" onclick="switchTab('live')">Live Scores</button>
-      <button class="vtab${_safeTab === "stats" ? " active" : ""}" onclick="switchTab('stats')">Player Stats</button>
-      <button class="vtab${_safeTab === "season" ? " active" : ""}" onclick="switchTab('season')">Season Table</button>
-      <button class="vtab${_safeTab === "history" ? " active" : ""}" onclick="switchTab('history')">History</button>
-    </div>`;
+          let _tabBody = "";
+          if (_safeTab === "team")        _tabBody = renderTeamTab();
+          else if (_safeTab === "live")   _tabBody = renderLiveTab();
+          else if (_safeTab === "stats")  _tabBody = renderMemberStatsTab();
+          else if (_safeTab === "season") _tabBody = renderSeasonTab();
+          else if (_safeTab === "history") _tabBody = renderHistoryTab();
+          else if (_safeTab === "scoreboard") _tabBody = renderLiveScoreboardTab();
+          else _tabBody = renderTeamTab();
           memberBody.innerHTML =
-            tabs +
+            _memberTabsHtml(_safeTab) +
             renderMemberMatchSelector() +
             `<div id="tab-body">${_tabBody}</div>`;
           requestAnimationFrame(() => bindMember(true));
@@ -1660,32 +1646,78 @@
       };
 
       function renderMember() {
-        const tab = new URLSearchParams(location.search).get("tab") || "team";
-
-        const tabs = `
-  <div class="view-tabs">
-    <button class="vtab ${tab === "team" ? "active" : ""}" onclick="switchTab('team')">My Team</button>
-    <button class="vtab ${tab === "live" ? "active" : ""}" onclick="switchTab('live')">Live Scores</button>
-    <button class="vtab ${tab === "stats" ? "active" : ""}" onclick="switchTab('stats')">Player Stats</button>
-    <button class="vtab ${tab === "season" ? "active" : ""}" onclick="switchTab('season')">Season Table</button>
-    <button class="vtab ${tab === "history" ? "active" : ""}" onclick="switchTab('history')">History</button>
-  </div>`;
+        let tab = new URLSearchParams(location.search).get("tab") || "team";
+        // If on scoreboard but match is no longer live, fall back to team tab
+        if (tab === "scoreboard" && !isCurrentMatchLive()) {
+          tab = "team";
+          history.replaceState({}, "", `${location.pathname}?tab=team`);
+        }
 
         const matchSelector = renderMemberMatchSelector();
 
         let body = "";
-        if (tab === "team") body = renderTeamTab();
-        if (tab === "live") body = renderLiveTab();
-        if (tab === "stats") body = renderMemberStatsTab();
-        if (tab === "season") body = renderSeasonTab();
-        if (tab === "history") body = renderHistoryTab();
+        if (tab === "team")        body = renderTeamTab();
+        if (tab === "live")        body = renderLiveTab();
+        if (tab === "stats")       body = renderMemberStatsTab();
+        if (tab === "season")      body = renderSeasonTab();
+        if (tab === "history")     body = renderHistoryTab();
+        if (tab === "scoreboard")  body = renderLiveScoreboardTab();
 
-        return `<div class="screen-main">${nav()}<div id="member-body">${tabs}${matchSelector}<div id="tab-body">${body}</div></div></div>`;
+        return `<div class="screen-main">${nav()}<div id="member-body">${_memberTabsHtml(tab)}${matchSelector}<div id="tab-body">${body}</div></div></div>`;
       }
 
       // expose for onclick
+      // ── Tab helpers ─────────────────────────────────────────────────────
+      // Returns true when the currently active match is in progress:
+      // locked by admin, not yet finalized, and CricAPI hasn't set matchEnded.
+      function isCurrentMatchLive() {
+        const m = getMatch(getActiveMid());
+        return !!(m?.locked && !m?.finalized && !m?.matchEnded);
+      }
+
+      // Centralised tab-bar HTML for member view.
+      // "Live Stats" tab only rendered when a match is live.
+      function _memberTabsHtml(activeTab) {
+        const sc = isCurrentMatchLive();
+        return `<div class="view-tabs">
+      <button class="vtab${activeTab === "team" ? " active" : ""}" onclick="switchTab('team')">My Team</button>
+      ${sc ? `<button class="vtab${activeTab === "scoreboard" ? " active" : ""}" onclick="switchTab('scoreboard')">Match Info</button>` : ""}
+      <button class="vtab${activeTab === "live" ? " active" : ""}" onclick="switchTab('live')">Live Scores</button>
+      <button class="vtab${activeTab === "stats" ? " active" : ""}" onclick="switchTab('stats')">Player Stats</button>
+      <button class="vtab${activeTab === "season" ? " active" : ""}" onclick="switchTab('season')">Season Table</button>
+      <button class="vtab${activeTab === "history" ? " active" : ""}" onclick="switchTab('history')">History</button>
+    </div>`;
+      }
+
+      // Centralised tab-bar HTML for admin view.
+      function _adminTabsHtml(activeTab) {
+        const sc = isCurrentMatchLive();
+        return `<div class="view-tabs">
+    <button class="vtab ${activeTab === "match" ? "active" : ""}" onclick="switchAdminTab('match')">Current Match</button>
+    ${sc ? `<button class="vtab ${activeTab === "scoreboard" ? "active" : ""}" onclick="switchAdminTab('scoreboard')">Match Info</button>` : ""}
+    <button class="vtab ${activeTab === "stats" ? "active" : ""}" onclick="switchAdminTab('stats')">Player Stats</button>
+    <button class="vtab ${activeTab === "season" ? "active" : ""}" onclick="switchAdminTab('season')">Season Table</button>
+    <button class="vtab ${activeTab === "league" ? "active" : ""}" onclick="switchAdminTab('league')">League Setup</button>
+    <button class="vtab ${activeTab === "history" ? "active" : ""}" onclick="switchAdminTab('history')">History</button>
+  </div>`;
+      }
+
+      // ── Live Scoreboard Tab ──────────────────────────────────────────────
+      // Standalone tab for both member and admin. Wraps renderLiveStatsView
+      // inside #lsv-body so the Master Pulse RAF patch can target it directly.
+      function renderLiveScoreboardTab() {
+        const liveMid = getActiveMid();
+        const liveMatch = getMatch(liveMid);
+        if (!liveMatch?.locked)
+          return `<div class="empty-state"><div class="es-icon">🏏</div><p class="muted">No live match in progress.</p></div>`;
+        const scoreBar = renderScoreBar(liveMatch);
+        return scoreBar + `<div id="lsv-body">${renderLiveStatsView(liveMatch)}</div>`;
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       window.autoFetchStats = (fb) => autoFetchStats(fb);
       window.switchTab = function (t) {
+        if (t !== "scoreboard") _lsvGen++; // cancel any pending RAF patch
         history.replaceState({}, "", `${location.pathname}?tab=${t}`);
         // Only reset scroll on desktop — on Android the instant scroll forces the
         // address bar to reappear, changing the viewport height and causing the
@@ -1701,31 +1733,26 @@
             b.classList.toggle("active", !!(m && m[1] === t));
           });
           let body = "";
-          if (t === "team") body = renderTeamTab();
-          if (t === "live") body = renderLiveTab();
-          if (t === "stats") body = renderMemberStatsTab();
-          if (t === "season") body = renderSeasonTab();
-          if (t === "history") body = renderHistoryTab();
+          if (t === "team")        body = renderTeamTab();
+          if (t === "live")        body = renderLiveTab();
+          if (t === "stats")       body = renderMemberStatsTab();
+          if (t === "season")      body = renderSeasonTab();
+          if (t === "history")     body = renderHistoryTab();
+          if (t === "scoreboard")  body = renderLiveScoreboardTab();
           tabBody.innerHTML = body;
           requestAnimationFrame(() => bindMember(true));
         } else {
           const memberBody = document.getElementById("member-body");
           if (memberBody) {
-            const tabs = `<div class="view-tabs">
-      <button class="vtab ${t === "team" ? "active" : ""}" onclick="switchTab('team')">My Team</button>
-      <button class="vtab ${t === "live" ? "active" : ""}" onclick="switchTab('live')">Live Scores</button>
-      <button class="vtab ${t === "stats" ? "active" : ""}" onclick="switchTab('stats')">Player Stats</button>
-      <button class="vtab ${t === "season" ? "active" : ""}" onclick="switchTab('season')">Season Table</button>
-      <button class="vtab ${t === "history" ? "active" : ""}" onclick="switchTab('history')">History</button>
-    </div>`;
             let body = "";
-            if (t === "team") body = renderTeamTab();
-            if (t === "live") body = renderLiveTab();
-            if (t === "stats") body = renderMemberStatsTab();
-            if (t === "season") body = renderSeasonTab();
-            if (t === "history") body = renderHistoryTab();
+            if (t === "team")        body = renderTeamTab();
+            if (t === "live")        body = renderLiveTab();
+            if (t === "stats")       body = renderMemberStatsTab();
+            if (t === "season")      body = renderSeasonTab();
+            if (t === "history")     body = renderHistoryTab();
+            if (t === "scoreboard")  body = renderLiveScoreboardTab();
             memberBody.innerHTML =
-              tabs +
+              _memberTabsHtml(t) +
               renderMemberMatchSelector() +
               `<div id="tab-body">${body}</div>`;
             requestAnimationFrame(() => bindMember(true));
@@ -2438,13 +2465,13 @@
         const userTeam = (liveMatch.teams || {})[session.name] || {};
         const toggleBtn = `
           <div class="pv-toggle-row">
-            <button class="pv-toggle-btn ${_pitchViewActive ? "" : "pv-toggle-active"}"
-              onclick="window._setPitchView(false)">📊 Leaderboard</button>
-            <button class="pv-toggle-btn ${_pitchViewActive ? "pv-toggle-active" : ""}"
-              onclick="window._setPitchView(true)">🏟 Pitch View</button>
+            <button class="pv-toggle-btn ${_liveView === "leaderboard" ? "pv-toggle-active" : ""}"
+              onclick="window._setLiveView('leaderboard')">📊 Leaderboard</button>
+            <button class="pv-toggle-btn ${_liveView === "pitch" ? "pv-toggle-active" : ""}"
+              onclick="window._setLiveView('pitch')">🏟 Pitch View</button>
           </div>`;
 
-        const body = _pitchViewActive
+        const body = _liveView === "pitch"
           ? renderPitchView(liveMatch, userTeam)
           : renderMatchLeaderboard(liveMatch, liveMid, session.name);
 
@@ -2452,9 +2479,178 @@
       }
 
       window._setPitchView = function (active) {
-        _pitchViewActive = active;
+        // Kept for any external callers; routes through the unified state
+        window._setLiveView(active ? "pitch" : "leaderboard");
+      };
+
+      window._setLiveView = function (view) {
+        // Only "leaderboard" and "pitch" are valid inside the Live Scores tab.
+        // "stats" is now the standalone Live Stats tab — switchTab('scoreboard').
+        _liveView = view === "pitch" ? "pitch" : "leaderboard";
+        _pitchViewActive = (_liveView === "pitch");
         refreshView();
       };
+
+      // ── Live Stats View ──────────────────────────────────────────────────
+      // Renders a live batting + bowling scorecard from Firestore data.
+      // Called by renderLiveTab() and by the AR "pulse" DOM patch below.
+      // Data source: match.stats (written by autoFetchStats via CricAPI).
+      // No second API call — the AR timer already keeps this data fresh.
+      function renderLiveStatsView(match) {
+        const stats   = match.stats    || {};
+        const pool    = match.players  || matchPlayers;
+        const scores  = match.score    || [];
+        const isLive  = match.locked && !match.finalized;
+        const liveEnd = !!match.matchEnded;
+
+        if (!Object.keys(stats).length)
+          return `<div class="empty-state" style="padding:32px 0"><div class="es-icon">🏏</div><p class="muted">${isLive ? "Stats will appear once the first ball is bowled." : "No stats available yet."}</p></div>`;
+
+        // Resolve team keys for batting/bowling split
+        const t1Key = resolveTeamKey(match.t1 || "");
+        const t2Key = resolveTeamKey(match.t2 || "");
+        const t1img = match.t1img || (t1Key ? IPL_TEAM_LOGOS[t1Key] : "");
+        const t2img = match.t2img || (t2Key ? IPL_TEAM_LOGOS[t2Key] : "");
+        const t1col = IPL_TEAM_COLORS[t1Key]?.primary || "#2563ff";
+        const t2col = IPL_TEAM_COLORS[t2Key]?.primary || "#f59e0b";
+
+        const teamOf = (name) => {
+          const p = pool.find((x) => x.name === name);
+          if (!p) return null;
+          return resolveTeamKey(p.team || "") || normalizeTeam(p.team || "") || null;
+        };
+
+        const fmtOv = (o) => {
+          if (!o) return "0";
+          const f = Math.floor(o), b = Math.round((o - f) * 10);
+          return b > 0 ? `${f}.${b}` : `${f}`;
+        };
+        const fmtSR = (r, b) => (b > 0 ? ((r / b) * 100).toFixed(1) : "–");
+        const fmtEco = (r, o) => { const ov = toRealOvers(o || 0); return ov > 0 ? (r / ov).toFixed(2) : "–"; };
+
+        const runsClass  = (r) => r >= 100 ? "hsc-r-ton" : r >= 50 ? "hsc-r-fifty" : r >= 30 ? "hsc-r-warm" : r === 0 ? "hsc-r-duck" : "";
+        const srClass    = (r, b) => { if (!b) return ""; const sr = (r / b) * 100; return sr >= 150 ? "hsc-hi" : sr < 100 ? "hsc-lo" : ""; };
+        const ecoClass   = (r, o) => { const ov = toRealOvers(o || 0); if (!ov) return ""; const e = r / ov; return e < 7 ? "hsc-hi" : e > 9 ? "hsc-lo" : ""; };
+        const haulBadge  = (w) => w >= 5 ? '<span class="hsc-badge hsc-badge-fifer">5W</span>' : w >= 3 ? '<span class="hsc-badge hsc-badge-haul">3W</span>' : "";
+
+        // Live highlights: current batsmen + bowler names from Firestore
+        const liveBatNames = new Set((match.currentBatsmen || []).map(b => b.name || ""));
+        const liveBowlName = match.currentBowler?.name || null;
+
+        // Sort batsmen: faced ≥1 ball, desc by runs then balls
+        const getBatsmen = (tk) =>
+          Object.entries(stats)
+            .filter(([n, s]) => teamOf(n) === tk && (s.bat_balls ?? s.balls ?? 0) > 0)
+            .sort((a, b) => {
+              const ra = a[1].bat_runs ?? a[1].runs ?? 0, rb = b[1].bat_runs ?? b[1].runs ?? 0;
+              if (rb !== ra) return rb - ra;
+              return (b[1].bat_balls ?? b[1].balls ?? 0) - (a[1].bat_balls ?? a[1].balls ?? 0);
+            });
+
+        const getBowlers = (tk) =>
+          Object.entries(stats)
+            .filter(([n, s]) => teamOf(n) === tk && toRealOvers(s.overs || 0) > 0)
+            .sort((a, b) => toRealOvers(b[1].overs || 0) - toRealOvers(a[1].overs || 0));
+
+        const batRow = ([name, s]) => {
+          const r  = s.bat_runs  ?? s.runs  ?? null;
+          const b  = s.bat_balls ?? s.balls ?? null;
+          const f  = s.bat_4s    ?? s.fours ?? null;
+          const sx = s.bat_6s    ?? s.sixes ?? null;
+          const no = s.bat_notOut ?? s.notOut ?? false;
+          const isDuck    = s.batted && !no && r === 0;
+          const isCurrent = isLive && liveBatNames.has(name);
+          const fld = [(s.catches||0) > 0 ? `${s.catches}ct`:"", (s.stumpings||0) > 0 ? `${s.stumpings}st`:"", (s.runOutDirect||0)+(s.runOutIndirect||0) > 0 ? "RO":""].filter(Boolean).join(" ");
+          return `
+            <div class="hsc-bat-row${isDuck?" hsc-row-duck":""}${isCurrent?" lsv-live-row":""}">
+              <span class="hsc-col-name">
+                <span class="hsc-batter-name">${escHtml(name)}${no?'<span class="hsc-no">*</span>':""}</span>
+                ${isCurrent?'<span class="lsv-live-dot">●</span>':""}
+                ${fld?`<span class="hsc-fld">${fld}</span>`:""}
+              </span>
+              <span class="hsc-col-r"><span class="hsc-runs ${runsClass(r)}">${r??'–'}</span></span>
+              <span class="hsc-col-b hsc-dim">${b??'–'}</span>
+              <span class="hsc-col-sm hsc-dim">${f??'–'}</span>
+              <span class="hsc-col-sm hsc-dim">${sx??'–'}</span>
+              <span class="hsc-col-sr ${srClass(r,b)}">${fmtSR(r??0,b??0)}</span>
+            </div>`;
+        };
+
+        const bowlRow = ([name, s]) => {
+          const w = s.wickets || 0;
+          const isCurrent = isLive && name === liveBowlName;
+          return `
+            <div class="hsc-bowl-row${isCurrent?" lsv-live-row":""}">
+              <span class="hsc-col-name">
+                <span class="hsc-batter-name">${escHtml(name)}</span>
+                ${isCurrent?'<span class="lsv-live-dot">●</span>':""}
+                ${haulBadge(w)}
+              </span>
+              <span class="hsc-col-r">${fmtOv(s.overs)}</span>
+              <span class="hsc-col-b hsc-dim">${s.maidens??'–'}</span>
+              <span class="hsc-col-sm">${s.runsConceded??'–'}</span>
+              <span class="hsc-col-sm hsc-wkt ${w>=3?"hsc-wkt-haul":""}">${w||'–'}</span>
+              <span class="hsc-col-sr ${ecoClass(s.runsConceded,s.overs)}">${fmtEco(s.runsConceded,s.overs)}</span>
+            </div>`;
+        };
+
+        // Determine which innings is live (currently batting) to show the LIVE badge
+        const lastScore = scores.length ? scores[scores.length - 1] : null;
+        const liveInnKey = isLive && lastScore
+          ? (resolveInningKey ? resolveInningKey(lastScore.inning, match) : null)
+          : null;
+
+        const inningScore = (tk) => scores.find(sc => {
+          const k = resolveTeamKey(sc.inning || "") || (sc.inning || "").split(" ")[0];
+          return k === tk;
+        });
+
+        const innings = (batTk, bowlTk, img, col, label) => {
+          const bats = getBatsmen(batTk);
+          const bwls = getBowlers(bowlTk);
+          if (!bats.length && !bwls.length) return "";
+          const sc    = inningScore(batTk);
+          const isCurrentInn = isLive && liveInnKey === batTk;
+          return `
+            <div class="hsc-inn lsv-inn" style="--inn-col:${col}">
+              <div class="hsc-inn-hd">
+                <div class="hsc-inn-left">
+                  ${img?`<img src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
+                  <span class="hsc-inn-team">${label}</span>
+                  ${isCurrentInn?'<span class="lsv-live-badge">LIVE</span>':""}
+                </div>
+                ${sc?`<div class="hsc-inn-right">
+                  <span class="hsc-big-score">${sc.r||0}/${sc.w||0}</span>
+                  <span class="hsc-inn-ov">${parseFloat(sc.o||0).toFixed(1)} ov</span>
+                </div>`:""}
+              </div>
+              ${bats.length?`
+              <div class="lsv-tbl-wrap">
+                <div class="hsc-tbl-hd"><span class="hsc-col-name">BATTER</span><span class="hsc-col-r">R</span><span class="hsc-col-b hsc-dim">B</span><span class="hsc-col-sm hsc-dim">4s</span><span class="hsc-col-sm hsc-dim">6s</span><span class="hsc-col-sr">SR</span></div>
+                <div class="hsc-bat-body">${bats.map(batRow).join("")}</div>
+              </div>`:""}
+              ${bwls.length?`
+              <div class="lsv-tbl-wrap" style="margin-top:12px">
+                <div class="hsc-tbl-hd hsc-tbl-hd-bowl"><span class="hsc-col-name">BOWLER</span><span class="hsc-col-r">O</span><span class="hsc-col-b hsc-dim">M</span><span class="hsc-col-sm">R</span><span class="hsc-col-sm hsc-wkt">W</span><span class="hsc-col-sr">ECO</span></div>
+                <div class="hsc-bowl-body">${bwls.map(bowlRow).join("")}</div>
+              </div>`:""}
+            </div>`;
+        };
+
+        const inn1 = innings(t1Key, t2Key, t1img, t1col, t1Key || match.t1 || "Team 1");
+        const inn2 = innings(t2Key, t1Key, t2img, t2col, t2Key || match.t2 || "Team 2");
+
+        if (!inn1 && !inn2)
+          return `<div class="empty-state" style="padding:32px 0"><div class="es-icon">🏏</div><p class="muted">Stats will appear once the first ball is bowled.</p></div>`;
+
+        const statusChip = liveEnd
+          ? `<div class="lsv-status-chip lsv-chip-end">FINAL</div>`
+          : isLive
+            ? `<div class="lsv-status-chip lsv-chip-live">● LIVE</div>`
+            : "";
+
+        return `<div class="lsv-wrap">${statusChip}${inn1}${inn2}</div>`;
+      }
 
       window._viewMemberPitch = function (mid, memberName) {
         const match = _pvMatchCache[mid] || getMatch(mid);
@@ -4561,22 +4757,23 @@
 
         const adminContent = document.getElementById("admin-content");
         if (adminContent) {
-          const t = new URLSearchParams(location.search).get("atab") || "match";
-          // Only swap content — leave view-tabs untouched, update match selector in-place
-          document.querySelectorAll("#admin-body .vtab").forEach((b) => {
-            const m = b
-              .getAttribute("onclick")
-              ?.match(/switchAdminTab\('(\w+)'\)/);
-            b.classList.toggle("active", !!(m && m[1] === t));
-          });
+          let t = new URLSearchParams(location.search).get("atab") || "match";
+          if (t === "scoreboard" && !isCurrentMatchLive()) {
+            t = "match";
+            history.replaceState({}, "", `${location.pathname}?atab=match`);
+          }
           const mst = document.getElementById("admin-match-selector");
           if (mst) mst.outerHTML = renderMatchSelectorTabs();
+          // Re-render tab bar so Live Stats button appears/disappears with match state
+          const adminTabsEl2 = document.querySelector("#admin-body .view-tabs");
+          if (adminTabsEl2) adminTabsEl2.outerHTML = _adminTabsHtml(t);
           let body = "";
-          if (t === "match") body = renderAdminMatch();
-          if (t === "stats") body = renderAdminStats();
-          if (t === "season") body = renderAdminSeason();
-          if (t === "league") body = renderAdminLeague();
-          if (t === "history") body = renderHistoryTab();
+          if (t === "match")      body = renderAdminMatch();
+          if (t === "stats")      body = renderAdminStats();
+          if (t === "season")     body = renderAdminSeason();
+          if (t === "league")     body = renderAdminLeague();
+          if (t === "history")    body = renderHistoryTab();
+          if (t === "scoreboard") body = renderLiveScoreboardTab();
           adminContent.innerHTML = body;
           void adminContent.offsetHeight; // force layout flush → touch map rebuild
           bindAdmin(true); // synchronous — buttons bound before next user tap
@@ -4586,52 +4783,46 @@
       };
 
       function renderAdmin() {
-        const adminTab =
-          new URLSearchParams(location.search).get("atab") || "match";
-        const tabs = `
-  <div class="view-tabs">
-    <button class="vtab ${adminTab === "match" ? "active" : ""}" onclick="switchAdminTab('match')">Current Match</button>
-    <button class="vtab ${adminTab === "stats" ? "active" : ""}" onclick="switchAdminTab('stats')">Player Stats</button>
-    <button class="vtab ${adminTab === "season" ? "active" : ""}" onclick="switchAdminTab('season')">Season Table</button>
-    <button class="vtab ${adminTab === "league" ? "active" : ""}" onclick="switchAdminTab('league')">League Setup</button>
-    <button class="vtab ${adminTab === "history" ? "active" : ""}" onclick="switchAdminTab('history')">History</button>
-  </div>`;
+        let adminTab = new URLSearchParams(location.search).get("atab") || "match";
+        // If URL has scoreboard but match is no longer live, fall back to match tab
+        if (adminTab === "scoreboard" && !isCurrentMatchLive()) {
+          adminTab = "match";
+          history.replaceState({}, "", `${location.pathname}?atab=match`);
+        }
 
+        const tabs = _adminTabsHtml(adminTab);
         const matchTabs = renderMatchSelectorTabs();
 
         let body = "";
-        if (adminTab === "match") body = renderAdminMatch();
-        if (adminTab === "stats") body = renderAdminStats();
-        if (adminTab === "season") body = renderAdminSeason();
-        if (adminTab === "league") body = renderAdminLeague();
-        if (adminTab === "history") body = renderHistoryTab();
+        if (adminTab === "match")      body = renderAdminMatch();
+        if (adminTab === "stats")      body = renderAdminStats();
+        if (adminTab === "season")     body = renderAdminSeason();
+        if (adminTab === "league")     body = renderAdminLeague();
+        if (adminTab === "history")    body = renderHistoryTab();
+        if (adminTab === "scoreboard") body = renderLiveScoreboardTab();
 
         return `<div class="screen-main">${nav(true)}<div id="admin-body">${tabs}${matchTabs}<div id="admin-content">${body}</div></div></div>`;
       }
 
       window.switchAdminTab = function (t) {
+        if (t !== "scoreboard") _lsvGen++; // cancel any pending RAF patch
         history.replaceState({}, "", `${location.pathname}?atab=${t}`);
         const adminContent = document.getElementById("admin-content");
         if (adminContent) {
           // ── SMOOTH PAINT: hide first so the browser does layout work invisibly ──
-          // Setting opacity=0 before the swap means any reflow/repaint triggered by
-          // the innerHTML change happens on an invisible layer — the user sees the
-          // content only after it is fully composed and ready to paint.
           adminContent.style.opacity = "0";
 
-          // Only swap content — leave view-tabs and match-selector untouched
-          document.querySelectorAll("#admin-body .vtab").forEach((b) => {
-            const m = b
-              .getAttribute("onclick")
-              ?.match(/switchAdminTab\('(\w+)'\)/);
-            b.classList.toggle("active", !!(m && m[1] === t));
-          });
+          // Swap the tab-bar in place (adds/removes Live Stats button as match state changes)
+          const adminTabsEl = document.querySelector("#admin-body .view-tabs");
+          if (adminTabsEl) adminTabsEl.outerHTML = _adminTabsHtml(t);
+
           let body = "";
-          if (t === "match") body = renderAdminMatch();
-          if (t === "stats") body = renderAdminStats();
-          if (t === "season") body = renderAdminSeason();
-          if (t === "league") body = renderAdminLeague();
-          if (t === "history") body = renderHistoryTab();
+          if (t === "match")       body = renderAdminMatch();
+          if (t === "stats")       body = renderAdminStats();
+          if (t === "season")      body = renderAdminSeason();
+          if (t === "league")      body = renderAdminLeague();
+          if (t === "history")     body = renderHistoryTab();
+          if (t === "scoreboard")  body = renderLiveScoreboardTab();
           adminContent.innerHTML = body;
 
           // Synchronous reflow — forces Chrome to commit layout and rebuild the
@@ -9284,6 +9475,21 @@
               if (updated > 0) toast(`✓ Stats updated for ${updated} entries`);
               else toast("✓ Match status synced");
             }
+
+            // ── Master Pulse: surgical Live Stats DOM patch ──
+            // If the user is on the scoreboard tab (member or admin), patch only
+            // #lsv-body via requestAnimationFrame — skips the full refreshView
+            // debounce for an instant, flicker-free update.
+            // _lsvGen increments on tab/view switches; mismatched gen → stale patch dropped.
+            const _pulseMid = activeMid;
+            const _pulseGen = _lsvGen;
+            requestAnimationFrame(() => {
+              if (_lsvGen !== _pulseGen) return; // user navigated away — drop stale patch
+              const lsvBody = document.getElementById("lsv-body");
+              if (!lsvBody) return; // scoreboard tab not in view
+              const liveM = getMatch(_pulseMid);
+              if (liveM) lsvBody.innerHTML = renderLiveStatsView(liveM);
+            });
           } else {
             if (showFeedback)
               toast(
@@ -13019,6 +13225,87 @@
             }
 
             /* ── HSC: INNINGS BLOCK ──────────────────────────────────────── */
+            /* ── Live Stats View ───────────────────────────────────────── */
+            .lsv-wrap { padding-bottom: 16px; }
+
+            .lsv-status-chip {
+              display: inline-flex;
+              align-items: center;
+              gap: 5px;
+              font-family: "Barlow Condensed", sans-serif;
+              font-size: 11px;
+              font-weight: 800;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              padding: 4px 10px;
+              border-radius: 20px;
+              margin-bottom: 12px;
+            }
+            .lsv-chip-live {
+              background: rgba(34, 197, 94, 0.15);
+              color: #22c55e;
+              border: 1px solid rgba(34, 197, 94, 0.35);
+              animation: lsv-pulse 2s ease-in-out infinite;
+            }
+            .lsv-chip-end {
+              background: rgba(156, 163, 175, 0.12);
+              color: var(--muted2);
+              border: 1px solid var(--bd);
+            }
+            @keyframes lsv-pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.6; }
+            }
+
+            /* Live row highlight — current batsmen / bowling bowler */
+            .lsv-live-row {
+              background: rgba(34, 197, 94, 0.06) !important;
+            }
+            .lsv-live-dot {
+              display: inline-block;
+              color: #22c55e;
+              font-size: 9px;
+              margin-left: 4px;
+              vertical-align: middle;
+              animation: lsv-pulse 1.4s ease-in-out infinite;
+            }
+            .lsv-live-badge {
+              display: inline-block;
+              background: #22c55e;
+              color: #000;
+              font-family: "Barlow Condensed", sans-serif;
+              font-size: 10px;
+              font-weight: 900;
+              letter-spacing: 1px;
+              padding: 2px 7px;
+              border-radius: 4px;
+              margin-left: 8px;
+              vertical-align: middle;
+            }
+
+            /* Scrollable table wrapper — prevents horizontal overflow on 375px phones */
+            .lsv-tbl-wrap {
+              display: block;
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch; /* iOS momentum scroll */
+              overscroll-behavior-x: contain;    /* Android: no page-level overscroll */
+            }
+            /* Sticky header row inside scrollable table */
+            .lsv-tbl-wrap .hsc-tbl-hd,
+            .lsv-tbl-wrap .hsc-tbl-hd-bowl {
+              position: sticky;
+              top: 0;
+              z-index: 2;
+              background: var(--s1);
+            }
+
+            .lsv-inn { touch-action: pan-y; } /* allow vertical scroll; horizontal handled by wrapper */
+
+            /* Score readability: force white so dark team colours don't make it unreadable */
+            .lsv-wrap .hsc-big-score { color: var(--white); text-shadow: none; }
+
+            /* ── End Live Stats View ──────────────────────────────────── */
+
             .hsc-inn {
               margin-bottom: 20px;
               border-radius: var(--radius-md);
