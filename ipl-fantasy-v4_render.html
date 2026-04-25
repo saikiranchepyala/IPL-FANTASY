@@ -923,10 +923,12 @@
           showScreen("loading");
 
           // Sign in anonymously — required before any Firestore read.
-          // This gates the database behind a valid Firebase session so bots
-          // and DevTools console queries against the raw project cannot read
-          // data without first executing the app. Users see nothing.
-          await signInAnonymously(getAuth(app));
+          // Wrapped in a 5-second timeout so a slow Firebase Auth response
+          // on mobile doesn't leave the app frozen on the loading screen.
+          await Promise.race([
+            signInAnonymously(getAuth(app)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("auth-timeout")), 5000))
+          ]).catch(e => console.warn("Anonymous auth skipped:", e.message));
 
           // Init meta/game if needed
           const mgSnap = await getDoc(doc(db, "meta", "game"));
