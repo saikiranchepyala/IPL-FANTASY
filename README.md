@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.6.1** — [Changelog](#-changelog)
+**Current version: v3.6.2** — [Changelog](#-changelog)
 
 ---
 
@@ -49,36 +49,45 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 3. In the left sidebar → **Build → Firestore Database** → **Create database**
 4. Choose **Start in test mode** → region: `asia-south1` → **Enable**
 
-### Step 2 — Firestore Security Rules (Hardened)
+### Step 2 — Enable Anonymous Authentication
 
-In Firestore → **Rules** tab, replace everything with these hardened rules to prevent unauthorized deletions and structural corruption across all collections:
+The app signs every visitor in silently with Firebase Anonymous Auth before making any database calls. This ensures bots and direct API queries cannot read your database.
+
+1. Firebase Console → **Build → Authentication → Sign-in method**
+2. Click **Anonymous** → toggle **Enable** → **Save**
+
+### Step 3 — Firestore Security Rules (Hardened)
+
+In Firestore → **Rules** tab, replace everything with these rules. All reads and writes require a valid Firebase session (set automatically by the app via anonymous auth):
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /matches/{matchId} {
-      allow read: if true;
-      allow delete: if false; 
-      allow create: if true;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().size() == 0
+      allow read:   if request.auth != null;
+      allow delete: if false;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        request.resource.data.diff(resource.data).affectedKeys().size() == 0
         || request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                   'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                   'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                   'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                   't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                   'matchNum', 'fantasyEnabled', 'createdAt']);
+            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                     'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                     'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                     'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                     't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                     'matchNum', 'fantasyEnabled', 'createdAt'])
+      );
     }
     match /meta/{docId} {
-      allow read: if true;
-      allow delete: if false;
-      allow create, update: if docId == 'members' || docId == 'game';
+      allow read:           if request.auth != null;
+      allow delete:         if false;
+      allow create, update: if request.auth != null && (docId == 'members' || docId == 'game');
     }
     match /season/{docId} {
-      allow read: if true;
-      allow delete: if false;
-      allow create, update: if docId == 'totals';
+      allow read:           if request.auth != null;
+      allow delete:         if false;
+      allow create, update: if request.auth != null && docId == 'totals';
     }
   }
 }
@@ -278,6 +287,9 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.6.2 — April 24, 2026
+- **Firebase Anonymous Auth**: App now signs every visitor in silently with Firebase Anonymous Auth before any Firestore read. Firestore rules updated to require `request.auth != null` on all reads and writes — bots and direct API queries can no longer access the database without first loading and executing the app.
 
 ### v3.6.1 — April 24, 2026
 - **Mobile: duplicate font load removed** — Google Fonts `@import` inside CSS eliminated; fonts now load only once via the `<link>` in `<head>`, halving font download on first visit.

@@ -38,6 +38,7 @@
       // ═══════════════════════════════════════════════
 
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+      import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
       import {
         getFirestore,
         doc,
@@ -920,6 +921,12 @@
           const app = initializeApp(FIREBASE_CONFIG);
           db = getFirestore(app);
           showScreen("loading");
+
+          // Sign in anonymously — required before any Firestore read.
+          // This gates the database behind a valid Firebase session so bots
+          // and DevTools console queries against the raw project cannot read
+          // data without first executing the app. Users see nothing.
+          await signInAnonymously(getAuth(app));
 
           // Init meta/game if needed
           const mgSnap = await getDoc(doc(db, "meta", "game"));

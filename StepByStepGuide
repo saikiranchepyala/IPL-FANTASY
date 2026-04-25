@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.5.7
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.6.2
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -21,7 +21,18 @@ Step 2 — Create the Firestore database
   Region: select asia-south1 (Mumbai) → click Enable
   Wait for it to finish — you'll see an empty database screen
 
-Step 3 — Fix the security rules
+Step 3 — Enable Anonymous Authentication
+
+  In the left sidebar → click Build → Authentication
+  Click "Get started" if prompted
+  Click the "Sign-in method" tab
+  Click "Anonymous" → toggle Enable → click Save
+
+  Why: The app signs every visitor in silently before any database call.
+  This means bots and direct API queries can't read your data without
+  first loading and executing the app.
+
+Step 4 — Fix the security rules
 
   Inside Firestore, click the "Rules" tab at the top
   Delete everything in the editor and paste this:
@@ -30,34 +41,36 @@ Step 3 — Fix the security rules
     service cloud.firestore {
       match /databases/{database}/documents {
         match /matches/{matchId} {
-          allow read: if true;
-          allow delete: if false; 
-          allow create: if true;
-          allow update: if request.resource.data.diff(resource.data).affectedKeys().size() == 0
+          allow read:   if request.auth != null;
+          allow delete: if false;
+          allow create: if request.auth != null;
+          allow update: if request.auth != null && (
+            request.resource.data.diff(resource.data).affectedKeys().size() == 0
             || request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                       'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                       'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                       'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                       't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                       'matchNum', 'fantasyEnabled', 'createdAt']);
+                .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                         'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                         'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                         'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                         't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                         'matchNum', 'fantasyEnabled', 'createdAt'])
+          );
         }
         match /meta/{docId} {
-          allow read: if true;
-          allow delete: if false;
-          allow create, update: if docId == 'members' || docId == 'game';
+          allow read:           if request.auth != null;
+          allow delete:         if false;
+          allow create, update: if request.auth != null && (docId == 'members' || docId == 'game');
         }
         match /season/{docId} {
-          allow read: if true;
-          allow delete: if false;
-          allow create, update: if docId == 'totals';
+          allow read:           if request.auth != null;
+          allow delete:         if false;
+          allow create, update: if request.auth != null && docId == 'totals';
         }
       }
     }
 
   Click "Publish"
 
-Step 4 — Get your Firebase config
+Step 6 — Get your Firebase config
 
   Click the gear icon ⚙️ (top left, next to "Project Overview") → Project settings
   Scroll down to "Your apps" section
@@ -77,7 +90,7 @@ Step 4 — Get your Firebase config
 PHASE 2 — CONFIGURE THE HTML FILE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 5 — Edit the file
+Step 7 — Edit the file
 
   Download ipl-fantasy-v4_render.html from the repo
   Open it in a text editor:
@@ -103,7 +116,7 @@ Step 5 — Edit the file
 PHASE 3 — DEPLOY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 6 — Deploy to Netlify
+Step 8 — Deploy to Netlify
 
   Go to app.netlify.com/drop
   Drag and drop ipl-fantasy-v4_render.html onto the page
@@ -119,20 +132,20 @@ Step 6 — Deploy to Netlify
 PHASE 4 — FIRST TIME ADMIN SETUP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 7 — Log in as admin
+Step 9 — Log in as admin
 
   Open your Netlify URL
   Click "Admin" on the login screen
   Enter PIN: 0000 (the default)
 
-Step 8 — Change your admin PIN
+Step 10 — Change your admin PIN
 
   Go to League Setup tab
   In the Admin PIN field, replace 0000 with your own 4-digit PIN
   Click Save
   Remember this PIN — it's the only way back into the admin panel
 
-Step 9 — Generate the join link
+Step 11 — Generate the join link
 
   Still in League Setup tab
   Click "Generate Join Link"
@@ -144,13 +157,13 @@ Step 9 — Generate the join link
 PHASE 5 — GET CRICKETDATA.ORG API KEY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 10 — Get your API key
+Step 12 — Get your API key
 
   Go to cricketdata.org and sign up / log in
   Copy your API key from the dashboard
   This app uses a paid plan for full scorecard access
 
-Step 11 — Save the API key in the app
+Step 13 — Save the API key in the app
 
   Admin panel → Current Match tab → API Key field
   Paste your key → click "Save Key"
@@ -161,7 +174,7 @@ Step 11 — Save the API key in the app
 PHASE 6 — MATCH DAY FLOW (ADMIN)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 12 — Before match day
+Step 14 — Before match day
 
   Admin panel → Current Match tab
   Fill in Match Label (e.g. "MI vs CSK — Match 14") and Team 1 / Team 2
@@ -170,7 +183,7 @@ Step 12 — Before match day
     → liveMatchId auto-fills, player pool (~51 players) loads
   Share the league URL with your group — they can now pick their teams
 
-Step 13 — After the toss (~30 min before first ball)
+Step 15 — After the toss (~30 min before first ball)
 
   Toggle the "Auto every" dropdown to your preferred interval (e.g. 30 sec)
   and click the "OFF ⏸" button next to it to switch it to "ON 🟢". 
@@ -193,7 +206,7 @@ Step 13 — After the toss (~30 min before first ball)
     → Click "Mark Playing XI"
     → App fuzzy-matches names against the player pool and sets XI ready
 
-Step 14 — First ball
+Step 16 — First ball
 
   Click "START MATCH"
     → All member picks are locked (no more edits)
@@ -203,13 +216,13 @@ Step 14 — First ball
   Keep your admin browser tab open during the match — the poller only
   runs while the tab is active.
 
-Step 15 — During the match
+Step 17 — During the match
 
   Points update live for everyone automatically
   After each innings, check the Player Stats tab for any missing
   catches, stumpings, or run-outs — fix them manually if needed
 
-Step 16 — After the match
+Step 18 — After the match
 
   Poller fires one final fetch 60 seconds after CricAPI signals match over
     → This grace poll captures any last-over stats that lagged behind

@@ -1,12 +1,31 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.6.1"
+version: "3.6.2"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern GlassMorphism)"
 ---
 
-# IPL Fantasy League v3.6.0 — Project Intelligence
+# IPL Fantasy League v3.6.2 — Project Intelligence
+
+## 🔐 Firebase Anonymous Auth (v3.6.2 — April 24, 2026)
+
+**Goal**: Gate all Firestore access behind Firebase Anonymous Auth so the database cannot be read or written by bots or direct API queries.
+
+### Change 1 — Auth import
+Added `getAuth` and `signInAnonymously` to the Firebase Auth module import in the ES module block.
+
+### Change 2 — `boot()` auth call
+`signInAnonymously(getAuth(app))` is called immediately after `db = getFirestore(app)` and before the first Firestore read (`getDoc(doc(db, "meta", "game"))`). This ensures every session has a valid Firebase UID before any database interaction.
+
+### Change 3 — Firestore rules tightened
+All `allow read: if true` and `allow create, update: if ...` expressions updated to require `request.auth != null`. A visitor who has not executed the app (and therefore not signed in anonymously) cannot read or write any collection.
+
+**Why auth before rules**: The Firestore rule change and the client-side auth call must be deployed together. If rules are tightened before the client calls `signInAnonymously`, the app breaks for all users. The sequence is: deploy new HTML → update rules in Firebase console.
+
+---
+
+## 🔐 Security Hardening Round 2 (v3.6.0 — April 24, 2026)
 
 ## 🔐 Security Hardening Round 2 (v3.6.0 — April 24, 2026)
 
