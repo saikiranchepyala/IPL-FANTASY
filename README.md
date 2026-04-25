@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.9** — [Changelog](#-changelog)
+**Current version: v3.6.0** — [Changelog](#-changelog)
 
 ---
 
@@ -268,6 +268,8 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ```
 /
 ├── ipl-fantasy-v4_render.html   # The entire app — single HTML file
+├── firestore.rules              # Firestore security rules (version-controlled)
+├── netlify.toml                 # Netlify deploy config + security headers
 ├── skillipl.md                  # Project intelligence / architecture doc
 ├── StepByStepGuide              # Detailed setup walkthrough
 └── README.md                    # This file
@@ -276,6 +278,13 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.6.0 — April 24, 2026
+- **Name validation**: Member names containing `.` `[` `]` `#` `$` `/` are now rejected at join time — prevents dot-path corruption in booster `updateDoc` writes where `.` is treated as a Firestore field separator.
+- **Session timeout**: Sessions older than 10 hours are automatically cleared on boot — removed members can no longer stay logged in indefinitely.
+- **Error message hygiene**: Boot-time Firebase errors now show a generic "could not connect" message instead of leaking collection names/paths; `e.message` in match-list innerHTML is now escaped with `escHtml()`.
+- **Security headers**: Added `netlify.toml` with `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-XSS-Protection` for all routes.
+- **Firestore rules**: Added `firestore.rules` to the repo — rules are now version-controlled with full audit history and rollback capability.
 
 ### v3.5.9 — April 24, 2026
 - **XSS hardening**: Wrapped all unescaped `p.name` / `match.label` / `shortName(m.name)` innerHTML insertions with `escHtml()` across My Team card, Player Stats card, player selection card, admin pool chip, match option list, and history modal title.

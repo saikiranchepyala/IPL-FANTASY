@@ -1,12 +1,37 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.9"
+version: "3.6.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern GlassMorphism)"
 ---
 
-# IPL Fantasy League v3.5.9 — Project Intelligence
+# IPL Fantasy League v3.6.0 — Project Intelligence
+
+## 🔐 Security Hardening Round 2 (v3.6.0 — April 24, 2026)
+
+### Fix 1 — Name validation: block Firestore dot-path unsafe characters
+Added validation in `doJoin()` rejecting names containing `.` `[` `]` `#` `$` `/`. The primary fix targets `.` — v3.5.7 introduced `updateDoc` with dot-path notation for booster writes; a name like `J.Smith` would cause `updateDoc(doc, { "J.Smith.boosters": inv })` to write to a nested path `J → Smith → boosters` instead of the `J.Smith` field key, silently corrupting booster data.
+
+### Fix 2 — Session timeout (10 hours)
+`sessionSave()` now writes `savedAt: Date.now()` to localStorage. On `boot()`, if the saved session is older than 10 hours (`_SESSION_TTL = 36_000_000ms`), the session is cleared before restoration. Prevents removed/ex-members from staying logged in indefinitely across days.
+
+### Fix 3 — Error message hygiene
+- Boot-time `showError("Firebase error: " + e.message)` replaced with a generic user-facing message; real error logged to `console.warn`. Prevents collection names and Firestore paths from leaking to unauthenticated users on the login screen.
+- `e.message` in match-list `innerHTML` (Find IPL Matches + Search Series panels) wrapped with `escHtml()` — was a minor XSS vector if CricAPI returned an error containing HTML.
+
+### Fix 4 — netlify.toml: security response headers
+New `netlify.toml` applies to all routes:
+- `X-Frame-Options: DENY` — blocks clickjacking
+- `X-Content-Type-Options: nosniff` — blocks MIME sniffing
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `X-XSS-Protection: 1; mode=block`
+
+### Fix 5 — firestore.rules committed to repo
+`firestore.rules` added at repo root — Firestore security rules are now version-controlled. Full audit history and rollback via git. Previously rules only existed in the Firebase console with no history.
+
+---
 
 ## 🔒 XSS Hardening & Input Safety (v3.5.9 — April 24, 2026)
 

@@ -868,6 +868,7 @@
               name: session.name,
               isAdmin: session.isAdmin,
               memberSelectedMatchId,
+              savedAt: Date.now(),
             }),
           );
         } catch (e) { console.warn(e); }
@@ -1014,7 +1015,12 @@
             const saved = JSON.parse(
               localStorage.getItem("ipl_session") || "null",
             );
-            if (saved && (saved.name || saved.isAdmin)) {
+            const _SESSION_TTL = 10 * 60 * 60 * 1000; // 10 hours
+            const _sessionExpired = saved?.savedAt && (Date.now() - saved.savedAt) > _SESSION_TTL;
+            if (_sessionExpired) {
+              localStorage.removeItem("ipl_session");
+              sessionStorage.removeItem("_adminOk");
+            } else if (saved && (saved.name || saved.isAdmin)) {
               // isAdmin only restored if PIN was verified in this browser session (not just in localStorage)
               const _adminOk =
                 !!saved.isAdmin && sessionStorage.getItem("_adminOk") === "1";
@@ -1030,7 +1036,8 @@
             showScreen("loading"); // wait for Firebase data
           else showScreen("login");
         } catch (e) {
-          showError("Firebase error: " + e.message);
+          console.warn("Boot error:", e);
+          showError("Could not connect to the database. Check your internet connection and try refreshing.");
         }
       }
 
@@ -1497,6 +1504,10 @@
           err = document.getElementById("joinErr");
         if (!name) {
           err.textContent = "Enter your name";
+          return;
+        }
+        if (/[.\[\]#$/]/.test(name)) {
+          err.textContent = "Name cannot contain . [ ] # $ / — choose a different name";
           return;
         }
         if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
@@ -7843,7 +7854,7 @@
 
           renderMatchList(filtered, list, key, isIPL);
         } catch (e) {
-          list.innerHTML = `<p style="color:var(--red);font-size:13px">${e.message}</p>`;
+          list.innerHTML = `<p style="color:var(--red);font-size:13px">${escHtml(e.message)}</p>`;
           toast("Error: " + e.message, "err");
         } finally {
           btn.textContent = isIPL
@@ -7937,7 +7948,7 @@
           list.innerHTML = `<div class="ss-result-label">Results for: <em>${seriesNames}</em></div>`;
           renderMatchList(matches, list, key, _matchType === "ipl", true);
         } catch (e) {
-          list.innerHTML = `<p style="color:var(--red);font-size:13px">${e.message}</p>`;
+          list.innerHTML = `<p style="color:var(--red);font-size:13px">${escHtml(e.message)}</p>`;
           toast("Error: " + e.message, "err");
         } finally {
           btn.textContent = "Search Series";
