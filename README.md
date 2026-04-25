@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.8** — [Changelog](#-changelog)
+**Current version: v3.5.9** — [Changelog](#-changelog)
 
 ---
 
@@ -276,6 +276,13 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.5.9 — April 24, 2026
+- **XSS hardening**: Wrapped all unescaped `p.name` / `match.label` / `shortName(m.name)` innerHTML insertions with `escHtml()` across My Team card, Player Stats card, player selection card, admin pool chip, match option list, and history modal title.
+- **Race condition fix**: `setDoc` on `meta/members` at join and admin profile save now uses `{ merge: true }` — prevents a simultaneous join from overwriting another member's data.
+- **Supply chain**: Added SRI hash (`sha384`) to the canvas-confetti CDN script tag.
+- **CSS**: Removed orphaned closing `}` that was causing an IDE parse error in the mobile performance media query block.
+- **Input hardening**: Added `maxlength="30"` to member name, join name, and join team name inputs.
 
 ### v3.5.8 — April 24, 2026
 - **Match Info tab**: Added a standalone 6th tab showing the live batting and bowling scorecard. Tab is conditionally rendered — it only appears when a match is live (`locked && !finalized && !matchEnded`) and disappears automatically when the match ends. Positioned between "My Team" and "Live Scores" in member view, and between "Current Match" and "Player Stats" in admin view. RAF-based DOM patch keeps it in sync with every auto-fetch cycle.

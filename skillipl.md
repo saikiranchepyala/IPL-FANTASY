@@ -1,12 +1,39 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.5.8"
+version: "3.5.9"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern GlassMorphism)"
 ---
 
-# IPL Fantasy League v3.5.8 — Project Intelligence
+# IPL Fantasy League v3.5.9 — Project Intelligence
+
+## 🔒 XSS Hardening & Input Safety (v3.5.9 — April 24, 2026)
+
+**Goal**: Apply all confirmed-safe P1 security fixes from the full audit.
+
+### Fix 1 — XSS: escHtml on all unescaped player/match name innerHTML insertions
+Wrapped `p.name`, `match.label`, and `shortName(m.name)` with `escHtml()` across six render paths:
+- `mtc-name` (My Team card)
+- `sc-nm` (Player Stats card)
+- `pc-name` (player selection card)
+- pool-chip label (admin pool)
+- `mopt-name` (match option in Find IPL Matches)
+- `hm-title` (history modal title)
+
+### Fix 2 — Race condition: setDoc → setDoc with merge:true
+Both member join (`doJoin`) and admin profile save now use `{ merge: true }` on the `meta/members` write. Prevents a simultaneous join from silently overwriting a different member's record.
+
+### Fix 3 — Supply chain: SRI hash on confetti CDN
+Added `integrity="sha384-..."` and `crossorigin="anonymous"` to the canvas-confetti script tag. A CDN compromise can no longer silently inject code.
+
+### Fix 4 — CSS: removed orphaned closing brace
+Removed the stray `}` in the mobile performance block that was prematurely closing nothing, causing an IDE "at-rule or selector expected" parse error on line 15970.
+
+### Fix 5 — Input hardening: maxlength on name fields
+Added `maxlength="30"` to member login name, join name, and join team name inputs. Prevents excessively long strings from reaching Firestore or rendering paths.
+
+---
 
 ## 🏏 Match Info Tab + Live Fetch Crash Fix (v3.5.8 — April 24, 2026)
 

@@ -21,7 +21,7 @@
       href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" integrity="sha384-Rv68Y7adOjMMJc1/xFMcdNvXre/HF51to4GZjBALmXr7ABnVl5V4UajJwBu7zbhN" crossorigin="anonymous"></script>
     <script type="module">
       // ═══════════════════════════════════════════════
       //  ONLY EDIT THIS — paste your Firebase config
@@ -1266,7 +1266,7 @@
     <div id="panel-member" ${memberHidden}>
       <p class="fhint">Already in the league? Log in below.<br>New player? Use the join link your admin sent.</p>
       <div class="field"><label>Your Name</label>
-        <input id="memberNameInp" type="text" placeholder="e.g. Rahul" autocomplete="off">
+        <input id="memberNameInp" type="text" placeholder="e.g. Rahul" autocomplete="off" maxlength="30">
       </div>
       <div class="field"><label>Your PIN</label>
         <div class="pin-row">${'<input class="pm" maxlength="1" type="password" inputmode="numeric">'.repeat(4)}</div>
@@ -1296,8 +1296,8 @@
   <div class="card">
     <p class="brand-sub" style="text-align:center;margin-bottom:14px">You've been invited! 🎉</p>
     <div class="join-badge">${code}</div>
-    <div class="field"><label>Your Name</label><input id="joinName" type="text" placeholder="e.g. Rahul"></div>
-    <div class="field"><label>Team Name <span class="hint">(optional)</span></label><input id="joinTeamName" type="text" placeholder="e.g. Chennai Champions"></div>
+    <div class="field"><label>Your Name</label><input id="joinName" type="text" placeholder="e.g. Rahul" maxlength="30"></div>
+    <div class="field"><label>Team Name <span class="hint">(optional)</span></label><input id="joinTeamName" type="text" placeholder="e.g. Chennai Champions" maxlength="30"></div>
     <div class="field"><label>Choose a 4-digit PIN <span class="hint">(to log back in)</span></label>
       <div class="pin-row">${'<input class="pj" maxlength="1" type="password" inputmode="numeric">'.repeat(4)}</div>
     </div>
@@ -1531,7 +1531,7 @@
           joinedAt: Date.now(),
           boosters: members[name]?.boosters || { ...BST_DEFAULTS },
         };
-        await setDoc(doc(db, "meta", "members"), members);
+        await setDoc(doc(db, "meta", "members"), members, { merge: true });
         allMembers = members;
         session = { name, isAdmin: false };
         localTeam = { players: [], captain: "", vc: "" };
@@ -1710,8 +1710,7 @@
         const liveMatch = getMatch(liveMid);
         if (!liveMatch?.locked)
           return `<div class="empty-state"><div class="es-icon">🏏</div><p class="muted">No live match in progress.</p></div>`;
-        const scoreBar = renderScoreBar(liveMatch);
-        return scoreBar + `<div id="lsv-body">${renderLiveStatsView(liveMatch)}</div>`;
+        return `<div id="lsv-body">${renderLiveStatsView(liveMatch)}</div>`;
       }
       // ────────────────────────────────────────────────────────────────────
 
@@ -2013,7 +2012,7 @@
       <div class="mtc-info">
         <div class="mtc-name">
           ${badgeClass ? `<span class="badge-status ${badgeClass}">${badgeLabel}</span>` : ""}
-          ${p.name}
+          ${escHtml(p.name)}
           ${p.isC ? '<span class="mtc-badge mtc-badge-c">C</span>' : ""}
           ${p.isV ? '<span class="mtc-badge mtc-badge-v">VC</span>' : ""}
           ${bstBadge}
@@ -3026,7 +3025,7 @@
         overlay.innerHTML = `
           <div class="history-modal">
             <div class="hm-header">
-              <div class="hm-title">${match.label || "Match History"}</div>
+              <div class="hm-title">${escHtml(match.label || "Match History")}</div>
               <button class="hm-close" onclick="this.closest('.history-overlay').remove()">×</button>
             </div>
             <div class="hm-body">
@@ -3164,7 +3163,7 @@
           <div class="stat-card ${roleClass[p.role] || ""}" style="animation-delay:${stagger}ms">
             <div class="sc-hd">
               <div>
-                <div class="sc-nm">${p.name}</div>
+                <div class="sc-nm">${escHtml(p.name)}</div>
                 <div class="sc-tm">${ri[p.role] || ""} ${p.role} · ${normalizeTeam(p.team)}</div>
               </div>
               <div class="sc-pts ${pts > 0 ? "sc-pts-on" : ""}">${ptsHtml}</div>
@@ -4226,7 +4225,7 @@
       ${fgnFull && !teamFull && !xiFull ? '<div class="team-cap-badge" style="background:#2563eb">4/4</div>' : ""}
       ${overBudget && !xiFull && !teamFull && !fgnFull ? '<div class="team-cap-badge" style="background:var(--muted)">💸</div>' : ""}
       <div class="pc-role">${ri[mappedRole] || ""} ${mappedRole}</div>
-      <div class="pc-name">${p.name}</div>
+      <div class="pc-name">${escHtml(p.name)}</div>
       ${isFgn && isIPLMatch() ? '<div class="pc-overseas-tag">FOREIGN</div>' : ""}
       <div class="pc-footer">
         <span class="pc-team">${normalizeTeam(p.team)}${counts[p.team] && !s ? ` <span class="team-cnt">${counts[p.team]}/${MAX_PER_TEAM}</span>` : ""}</span>
@@ -5061,7 +5060,7 @@
               .map(
                 (p) => `
               <span class="pool-chip" title="Click role to change">
-                ${p.name} <em>${normalizeTeam(p.team)}</em>
+                ${escHtml(p.name)} <em>${normalizeTeam(p.team)}</em>
                 <select class="pool-role-sel" data-p="${p.name.replace(/'/g, "\\'")}" onchange="adminChangePoolRole(this)">
                   ${["BAT", "BOWL", "AR", "WK"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}
                 </select>
@@ -8224,7 +8223,7 @@
           isAdmin: true,
           boosters: members[name]?.boosters || { ...BST_DEFAULTS },
         };
-        await setDoc(doc(db, "meta", "members"), members);
+        await setDoc(doc(db, "meta", "members"), members, { merge: true });
         await updateDoc(doc(db, "meta", "game"), {
           adminProfile: { name, teamName: teamName || name + "'s XI" },
         });
@@ -8462,7 +8461,7 @@
         const hasSquad = m.hasSquad;
         return `<div class="mopt">
     <div style="min-width:0;overflow:hidden;flex:1">
-      <div class="mopt-name">${shortName(m.name || "Match")}</div>
+      <div class="mopt-name">${escHtml(shortName(m.name || "Match"))}</div>
       <div class="mopt-st">${status}${timeStr}</div>
       ${!hasSquad && !m.matchStarted ? '<div class="mopt-warn">⚠ Squad not announced yet — you can still select and add players manually</div>' : ""}
     </div>
@@ -15968,7 +15967,6 @@
               .csb-big-score, .hsc-big-score {
                 text-shadow: 0 2px 6px rgba(0,0,0,.8) !important;
               }
-            }
 
             /* Touch-device specific (catches phones in landscape too) */
             @media (hover: none) and (pointer: coarse) {
