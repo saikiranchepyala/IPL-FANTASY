@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.6.0** — [Changelog](#-changelog)
+**Current version: v3.6.1** — [Changelog](#-changelog)
 
 ---
 
@@ -278,6 +278,12 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.6.1 — April 24, 2026
+- **Mobile: duplicate font load removed** — Google Fonts `@import` inside CSS eliminated; fonts now load only once via the `<link>` in `<head>`, halving font download on first visit.
+- **Mobile: toast safe-area fix** — Toast `bottom` position now uses `max(20px, env(safe-area-inset-bottom, 20px))` so it clears the iPhone home indicator on all modern iPhones.
+- **Mobile: recent overs scroll** — Added `-webkit-overflow-scrolling: touch` and `overscroll-behavior-x: contain` to `.csb-recent-overs` for smooth iOS momentum scroll.
+- **Mobile: touch target fix** — `.btn-ghost` and `.btn-sm` now have `min-height: 44px` in the touch media query, meeting Apple HIG and Material minimum tap-target sizes.
 
 ### v3.6.0 — April 24, 2026
 - **Name validation**: Member names containing `.` `[` `]` `#` `$` `/` are now rejected at join time — prevents dot-path corruption in booster `updateDoc` writes where `.` is treated as a Firestore field separator.

@@ -9964,7 +9964,7 @@
          Sky Sports · Fox Cricket · SuperSport
          ─ Zero glow · High contrast · Angular · Sharp ─
       ═══════════════════════════════════════════════════════ */
-            @import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap");
+            /* Fonts loaded via <link> in <head> — @import removed to avoid double download */
 
             /* ── v2.6 PLATFORM OPTIMIZATIONS ── */
             :root {
@@ -12233,6 +12233,8 @@
                 border-top: 1px solid rgba(255,255,255,0.05);
                 font-family: var(--font-num);
                 overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior-x: contain;
                 scrollbar-width: none; /* Hide scrollbar Firefox */
               }
               .csb-recent-overs::-webkit-scrollbar { display: none; } /* Hide scrollbar Chrome/Safari */
@@ -14511,7 +14513,7 @@
             /* ── TOAST ── */
             .toast {
               position: fixed;
-              bottom: 20px;
+              bottom: max(20px, env(safe-area-inset-bottom, 20px));
               right: 16px;
               padding: 10px 18px;
               border-radius: var(--radius-md);
@@ -16049,10 +16051,13 @@
                 overscroll-behavior-x: none;
               }
 
-              /* Enlarge btn-sm touch targets — Apple HIG minimum is 44px, Material is 48px */
+              /* Enlarge touch targets — Apple HIG minimum is 44px, Material is 48px */
               .btn-sm {
-                min-height: 36px;
+                min-height: 44px;
                 padding: 8px 13px;
+              }
+              .btn-ghost {
+                min-height: 44px;
               }
             }
 
