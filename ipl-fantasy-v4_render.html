@@ -9631,26 +9631,28 @@
       }
 
       // Called when matchEnded is first detected. Stops the recurring interval but schedules
-      // one grace poll 60s later — CricAPI scorecard typically lags 1-2 overs after matchEnded
-      // is set, so the stats written on the "ended" poll are stale. The grace poll gives CricAPI
-      // time to finalise the scorecard and captures final-over stats before truly stopping.
-      // Uses activeMid as a key: if admin navigates away (stopAR clears _arGracePollMid),
-      // the grace poll is silently skipped.
+      // 3 grace polls at 60s, 120s, 180s — CricAPI scorecard typically lags 2-3 min after
+      // matchEnded is set. Last-over bowlers and the winning not-out batsmen are the most
+      // commonly missing stats. Three polls give CricAPI enough time to commit the final
+      // scorecard before we stop. Each subsequent call to _handleMatchEnd from autoFetchStats
+      // (which sees ended:true) is a no-op once _arGracePollMid is set.
       function _handleMatchEnd(activeMid) {
-        if (window._arGracePollMid !== activeMid) {
-          // First detection — stop interval, schedule grace poll
-          stopAR();
-          window._arGracePollMid = activeMid;
-          toast("🏁 Match ended — fetching final stats in 60s...", "info");
-          setTimeout(() => {
-            if (window._arGracePollMid === activeMid) autoFetchStats(false);
-          }, 60000);
-        } else {
-          // Grace poll completed — truly stop now
-          window._arGracePollMid = null;
-          stopAR();
-          toast("🏁 Final stats saved. Click 'Finalize & Save' when ready.", "info");
-        }
+        if (window._arGracePollMid === activeMid) return; // already handling — no-op
+        stopAR();
+        window._arGracePollMid = activeMid;
+        toast("🏁 Match ended — fetching final stats over the next 3 min...", "info");
+        const GRACE_DELAYS = [60000, 120000, 180000];
+        GRACE_DELAYS.forEach((delay, i) => {
+          const isLast = i === GRACE_DELAYS.length - 1;
+          setTimeout(async () => {
+            if (window._arGracePollMid !== activeMid) return; // cancelled
+            await autoFetchStats(false);
+            if (isLast) {
+              window._arGracePollMid = null;
+              toast("🏁 Final stats saved. Click 'Finalize & Save' when ready.", "info");
+            }
+          }, delay);
+        });
       }
 
       // ── Helpers ──
