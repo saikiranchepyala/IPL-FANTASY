@@ -38,7 +38,6 @@
       // ═══════════════════════════════════════════════
 
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-      import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
       import {
         getFirestore,
         doc,
@@ -922,13 +921,6 @@
           db = getFirestore(app);
           showScreen("loading");
 
-          // Sign in anonymously — required before any Firestore read.
-          // Wrapped in a 5-second timeout so a slow Firebase Auth response
-          // on mobile doesn't leave the app frozen on the loading screen.
-          await Promise.race([
-            signInAnonymously(getAuth(app)),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("auth-timeout")), 5000))
-          ]).catch(e => console.warn("Anonymous auth skipped:", e.message));
 
           // Init meta/game if needed
           const mgSnap = await getDoc(doc(db, "meta", "game"));
