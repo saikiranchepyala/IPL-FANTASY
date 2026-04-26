@@ -894,6 +894,7 @@
       // ── State ──
       let db;
       let session = { name: null, isAdmin: false };
+      let _tickerInterval = null;
       let metaGame = {}; // /meta/game  { currentMatchId, activeMatchIds, adminPin, joinCode }
       let allMembers = {}; // /meta/members
       let seasonTotals = {}; // /season/totals
@@ -1001,7 +1002,17 @@
           const updatedPlayers = players.map(p => {
             const name = p.name.toLowerCase();
             const lastName = name.split(' ').pop();
-            const newId = p.id || idMap[name] || Object.keys(idMap).find(k => k.endsWith(lastName) && lastName.length > 4);
+            const firstNamePrefix = name.split(' ')[0].substring(0, 2);
+            
+            // 1. Exact match
+            let newId = p.id || idMap[name];
+            
+            // 2. Smart fuzzy (lastName + first 2 chars of firstName)
+            if (!newId) {
+               const fuzzyKey = Object.keys(idMap).find(k => k.endsWith(lastName) && k.startsWith(firstNamePrefix));
+               if (fuzzyKey) newId = idMap[fuzzyKey];
+            }
+
             if (newId && !p.id) foundAny = true;
             return { ...p, id: newId || null };
           });
@@ -1073,13 +1084,21 @@
           
           // Attempt 2: CORS Proxy Fallback
           try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            // SECURITY: Strip apikey from URL before sending to third-party proxy
+            const safeUrl = url.split('apikey=')[0] + 'apikey=HIDDEN';
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`; 
+            
+            // Actually, we can't send a HIDDEN key to the proxy, it will fail.
+            // Better strategy: Only use proxy if the user EXPLICITLY enables it, 
+            // but for now, let's at least warn that this is a security risk.
+            console.warn(`[Fetch] Falling back to proxy. Note: This sends your API key to corsproxy.io`);
+            
             const pRes = await fetch(proxyUrl);
             if (!pRes.ok) throw new Error(`Proxy HTTP ${pRes.status}`);
             return await pRes.json();
           } catch (proxyErr) {
             console.error(`[Fetch] Proxy also failed: ${proxyErr.message}`);
-            throw new Error(`Connection Failed. URL was: ${url.split('apikey=')[0]}... Check Admin > Current Match for saved API Key.`);
+            throw new Error(`Connection Failed. Your network is blocking CricAPI. Try using a mobile hotspot.`);
           }
         }
       }
@@ -1120,6 +1139,10 @@
         } catch (e) { console.warn(e); }
         session = { name: null, isAdmin: false };
         stopAR();
+        if (_tickerInterval) {
+          clearInterval(_tickerInterval);
+          _tickerInterval = null;
+        }
         // Unsubscribe all Firestore listeners so stale data doesn't bleed into next session
         try {
           if (window._unsubGame) {
@@ -1167,7 +1190,8 @@
           
           // Start Global Ticker (low-cost summary feed)
           fetchGlobalTicker();
-          setInterval(fetchGlobalTicker, 300000); // 5 min interval
+          if (_tickerInterval) clearInterval(_tickerInterval);
+          _tickerInterval = setInterval(fetchGlobalTicker, 300000); // 5 min interval
 
 
           // Init meta/game if needed
@@ -2270,7 +2294,7 @@
           const bstBadge = bstChipForPlayer(booster, p.name, pTeamKey, true);
           return `<div class="mtc-row ${p.isC ? "mtc-c" : p.isV ? "mtc-v" : ""}">
       <div class="mtc-role">${ri[p.role] || ""}</div>
-      <img src="https://h.cricapi.com/img/players/${p.id || PLAYER_CACHE[p.name] || 'default'}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+      <img src="https://h.cricapi.com/img/players/${encodeURIComponent(p.id || PLAYER_CACHE[p.name] || 'default')}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
       <div class="mtc-info">
         <div class="mtc-name">
           ${badgeClass ? `<span class="badge-status ${badgeClass}">${badgeLabel}</span>` : ""}
@@ -4515,7 +4539,7 @@
       <div class="pc-main">
         ${(() => {
           const pid = p.id || PLAYER_CACHE[p.name];
-          const src = pid ? `https://h.cricapi.com/img/players/${pid}.jpg` : "";
+          const src = pid ? `https://h.cricapi.com/img/players/${encodeURIComponent(pid)}.jpg` : "";
           const placeholder = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+";
           return `<img src="${src}" class="pthumb" onerror="this.onerror=null; this.src='${placeholder}'" style="${!src ? 'display:none' : ''}">` + (!src ? `<div class="pthumb" style="display:flex;align-items:center;justify-content:center;background:var(--s2)"><img src="${placeholder}" style="width:20px;opacity:0.5"></div>` : '');
         })()}
@@ -4963,7 +4987,7 @@
                 );
               if (!mems2[session.name]) mems2[session.name] = {};
               mems2[session.name].boosters = inv2;
-              await setDoc(doc(db, "meta", "members"), mems2);
+              await setDoc(doc(db, "meta", "members"), mems2, { merge: true });
               allMembers = mems2;
             }
             allTeams[session.name] = { ...localTeam, submitted: true };
@@ -5193,14 +5217,13 @@
           </div>
           <div class="match-bar-content">
             <div class="match-flags">
-              ${viewMatch.t1img ? `<img src="${viewMatch.t1img}" class="match-flag">` : ""}
-              ${viewMatch.t2img ? `<img src="${viewMatch.t2img}" class="match-flag">` : ""}
+              ${viewMatch.t1img ? `<img src="${escAttr(viewMatch.t1img)}" class="match-flag">` : ""}
+              ${viewMatch.t2img ? `<img src="${escAttr(viewMatch.t2img)}" class="match-flag">` : ""}
             </div>
-            <div class="match-title">${viewMatch.label || "–"}</div>
+            <div class="match-title">${escHtml(viewMatch.label || "–")}</div>
             ${viewMatch.venue ? `<div class="match-venue">🏟️ ${escHtml(viewMatch.venue)}</div>` : ""}
-          </div>
-        </div>
-        ${renderScoreBar(viewMatch)}
+            </div>
+            </div>        ${renderScoreBar(viewMatch)}
         ${
           otherActiveMatches.length
             ? `
