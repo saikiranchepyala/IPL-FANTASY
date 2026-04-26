@@ -21,7 +21,18 @@ Step 2 — Create the Firestore database
   Region: select asia-south1 (Mumbai) → click Enable
   Wait for it to finish — you'll see an empty database screen
 
-Step 3 — Fix the security rules
+Step 3 — Enable Anonymous Authentication
+
+  In the left sidebar → click Build → Authentication
+  Click "Get started" if prompted
+  Click the "Sign-in method" tab
+  Click "Anonymous" → toggle Enable → click Save
+
+  Why: The app signs every visitor in silently before any database call.
+  This means bots and direct API queries can't read your data without
+  first loading and executing the app.
+
+Step 4 — Fix the security rules
 
   Inside Firestore, click the "Rules" tab at the top
   Delete everything in the editor and paste this:
@@ -30,45 +41,36 @@ Step 3 — Fix the security rules
     service cloud.firestore {
       match /databases/{database}/documents {
         match /matches/{matchId} {
-          allow read: if true;
-          allow delete: if false; 
-          allow create: if true;
-          allow update: if request.resource.data.diff(resource.data).affectedKeys().size() == 0
+          allow read:   if request.auth != null;
+          allow delete: if false;
+          allow create: if request.auth != null;
+          allow update: if request.auth != null && (
+            request.resource.data.diff(resource.data).affectedKeys().size() == 0
             || request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                       'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                       'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                       'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                       't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                       'matchNum', 'fantasyEnabled', 'createdAt']);
+                .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                         'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                         'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                         'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                         't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                         'matchNum', 'fantasyEnabled', 'createdAt'])
+          );
         }
         match /meta/{docId} {
-          allow read: if true;
-          allow delete: if false; 
-          allow create, update: if docId == 'members' || docId == 'game' || docId == 'playerProfiles';
+          allow read:           if request.auth != null;
+          allow delete:         if false;
+          allow create, update: if request.auth != null && (docId == 'members' || docId == 'game' || docId == 'playerProfiles');
         }
         match /season/{docId} {
-          allow read: if true;
-          allow delete: if false;
-          allow create, update: if docId == 'totals';
+          allow read:           if request.auth != null;
+          allow delete:         if false;
+          allow create, update: if request.auth != null && docId == 'totals';
         }
       }
     }
 
   Click "Publish"
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RUNNING LOCALLY (ADVANCED)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-If you want to run the app on your computer instead of Netlify, you MUST use a local server. Double-clicking the file (file:// protocol) will block all API calls.
-
-1. Open Terminal (Mac) or PowerShell (Windows)
-2. Navigate to your folder: cd path/to/folder
-3. Start server: python3 -m http.server 8000
-4. Open browser: http://localhost:8000/ipl-fantasy-v4_render.html
-Step 4 — Get your Firebase config
+Step 5 — Get your Firebase config
 
   Click the gear icon ⚙️ (top left, next to "Project Overview") → Project settings
   Scroll down to "Your apps" section
@@ -88,7 +90,7 @@ Step 4 — Get your Firebase config
 PHASE 2 — CONFIGURE THE HTML FILE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 5 — Edit the file
+Step 6 — Edit the file
 
   Download ipl-fantasy-v4_render.html from the repo
   Open it in a text editor:
@@ -106,7 +108,7 @@ Step 5 — Edit the file
       appId:             "REPLACE_appId"
     };
 
-  Replace each REPLACE_* with your actual values from Step 4
+  Replace each REPLACE_* with your actual values from Step 5
   Save the file (Ctrl+S on Windows, Cmd+S on Mac)
 
 
@@ -114,7 +116,7 @@ Step 5 — Edit the file
 PHASE 3 — DEPLOY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 6 — Deploy to Netlify
+Step 7 — Deploy to Netlify
 
   Go to app.netlify.com/drop
   Drag and drop ipl-fantasy-v4_render.html onto the page
@@ -127,23 +129,35 @@ Step 6 — Deploy to Netlify
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RUNNING LOCALLY (ADVANCED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you want to run the app on your computer instead of Netlify, you MUST use a local server. Double-clicking the file (file:// protocol) will block all API calls.
+
+1. Open Terminal (Mac) or PowerShell (Windows)
+2. Navigate to your folder: cd path/to/folder
+3. Start server: python3 -m http.server 8000
+4. Open browser: http://localhost:8000/ipl-fantasy-v4_render.html
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHASE 4 — FIRST TIME ADMIN SETUP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 7 — Log in as admin
+Step 8 — Log in as admin
 
   Open your Netlify URL
   Click "Admin" on the login screen
   Enter PIN: 0000 (the default)
 
-Step 8 — Change your admin PIN
+Step 9 — Change your admin PIN
 
   Go to League Setup tab
   In the Admin PIN field, replace 0000 with your own 4-digit PIN
   Click Save
   Remember this PIN — it's the only way back into the admin panel
 
-Step 9 — Generate the join link
+Step 10 — Generate the join link
 
   Still in League Setup tab
   Click "Generate Join Link"
@@ -155,13 +169,13 @@ Step 9 — Generate the join link
 PHASE 5 — GET CRICKETDATA.ORG API KEY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 10 — Get your API key
+Step 11 — Get your API key
 
   Go to cricketdata.org and sign up / log in
   Copy your API key from the dashboard
   This app uses a paid plan for full scorecard access
 
-Step 11 — Save the API key in the app
+Step 12 — Save the API key in the app
 
   Admin panel → Current Match tab → API Key field
   Paste your key → click "Save Key"
@@ -172,7 +186,7 @@ Step 11 — Save the API key in the app
 PHASE 6 — MATCH DAY FLOW (ADMIN)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 12 — Before match day
+Step 13 — Before match day
 
   Admin panel → Current Match tab
   Fill in Match Label (e.g. "MI vs CSK — Match 14") and Team 1 / Team 2
@@ -181,7 +195,7 @@ Step 12 — Before match day
     → liveMatchId auto-fills, player pool (~51 players) loads
   Share the league URL with your group — they can now pick their teams
 
-Step 13 — After the toss (~30 min before first ball)
+Step 14 — After the toss (~30 min before first ball)
 
   Toggle the "Auto every" dropdown to your preferred interval (e.g. 30 sec)
   and click the "OFF ⏸" button next to it to switch it to "ON 🟢". 
@@ -204,7 +218,7 @@ Step 13 — After the toss (~30 min before first ball)
     → Click "Mark Playing XI"
     → App fuzzy-matches names against the player pool and sets XI ready
 
-Step 14 — First ball
+Step 15 — First ball
 
   Click "START MATCH"
     → All member picks are locked (no more edits)
@@ -214,13 +228,13 @@ Step 14 — First ball
   Keep your admin browser tab open during the match — the poller only
   runs while the tab is active.
 
-Step 15 — During the match
+Step 16 — During the match
 
   Points update live for everyone automatically
   After each innings, check the Player Stats tab for any missing
   catches, stumpings, or run-outs — fix them manually if needed
 
-Step 16 — After the match
+Step 17 — After the match
 
   Poller fires one final fetch 60 seconds after CricAPI signals match over
     → This grace poll captures any last-over stats that lagged behind
@@ -239,8 +253,10 @@ PHASE 7 — MEMBER FLOW (EACH MATCH)
   3. Choose Captain (2×) and Vice-Captain (1.5×)
   4. Optionally apply a Booster from the booster dock (see Booster section below)
   5. Tap "LOCK IN MY TEAM"
-  6. After admin clicks START MATCH → Live Scores tab for the leaderboard
-  7. Season Table tab for cumulative standings
+  6. After admin clicks START MATCH → Match Info tab appears automatically
+     showing the live batting/bowling scorecard (disappears when match ends)
+  7. Live Scores tab for the leaderboard and pitch view
+  8. Season Table tab for cumulative standings
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -268,16 +284,22 @@ Rules:
 TROUBLESHOOTING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+"API Connection Failed" or "Failed to Fetch"
+  → 1. Ensure you are running from http://localhost or Netlify (not file://).
+  → 2. Ensure your API Key is saved in Admin → Current Match.
+  → 3. The app includes an automatic proxy fallback to bypass network resets. 
+     If it still fails, try switching to a mobile hotspot.
+
 App stuck on Loading screen
   → Most likely a JavaScript error on boot. Hard-refresh (Ctrl+Shift+R /
     Cmd+Shift+R). If it persists, check the browser console for errors.
 
 "Firebase Not Configured" screen
-  → Re-open the HTML file, verify all 6 REPLACE_* values were replaced,
+  → Re-open the HTML file, verify all REPLACE_* values were replaced,
     re-save, re-upload to Netlify.
 
 Firestore permission denied error
-  → Firebase Console → Firestore → Rules → confirm Step 3 was done
+  → Firebase Console → Firestore → Rules → confirm Step 4 was done
     and "Publish" was clicked.
 
 Playing XI not loading after toss
@@ -317,10 +339,10 @@ Booster not saving
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHASE 4 — GIT MANAGEMENT (OPTIONAL)
+PHASE 8 — GIT MANAGEMENT (OPTIONAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Step 14 — Keep your repository in sync
+Step 18 — Keep your repository in sync
 
   If you make changes to your local file or update settings,
   use these commands to push them to GitHub:
@@ -331,10 +353,9 @@ Step 14 — Keep your repository in sync
   3.  Add your changes:
       git add .
   4.  Commit your changes:
-      git commit -m "Update for Match 35"
+      git commit -m "Update v3.6.8"
   5.  Push to GitHub:
       git push
 
   To get the latest updates from the main repo:
   1.  git pull
-

@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.5.7** — [Changelog](#-changelog)
+**Current version: v3.6.2** — [Changelog](#-changelog)
 
 ---
 
@@ -25,6 +25,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 - **Join via link** — admin generates a join code; members tap link and register
 - **Works on mobile** — fully responsive, designed for phone use during a match
 - **XSS Hardened** — all user inputs are sanitized before rendering
+- **Match Info tab** — live batting/bowling scorecard tab that appears automatically when a match is in progress and disappears when it ends; visible to both members and admins
 
 ---
 
@@ -48,36 +49,45 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 3. In the left sidebar → **Build → Firestore Database** → **Create database**
 4. Choose **Start in test mode** → region: `asia-south1` → **Enable**
 
-### Step 2 — Firestore Security Rules (Hardened)
+### Step 2 — Enable Anonymous Authentication
 
-In Firestore → **Rules** tab, replace everything with these hardened rules to prevent unauthorized deletions and structural corruption across all collections:
+The app signs every visitor in silently with Firebase Anonymous Auth before making any database calls. This ensures bots and direct API queries cannot read your database.
+
+1. Firebase Console → **Build → Authentication → Sign-in method**
+2. Click **Anonymous** → toggle **Enable** → **Save**
+
+### Step 3 — Firestore Security Rules (Hardened)
+
+In Firestore → **Rules** tab, replace everything with these rules. All reads and writes require a valid Firebase session (set automatically by the app via anonymous auth):
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /matches/{matchId} {
-      allow read: if true;
-      allow delete: if false; 
-      allow create: if true;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().size() == 0
+      allow read:   if request.auth != null;
+      allow delete: if false;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        request.resource.data.diff(resource.data).affectedKeys().size() == 0
         || request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                   'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                   'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                   'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                   't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                   'matchNum', 'fantasyEnabled', 'createdAt']);
+            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+                     'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
+                     'currentBowler', 'matchResult', 'abandoned', 'finalized',
+                     'tossResult', 'overSummaries', 'label', 'liveMatchId',
+                     't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
+                     'matchNum', 'fantasyEnabled', 'createdAt'])
+      );
     }
     match /meta/{docId} {
-      allow read: if true;
-      allow delete: if false;
-      allow create, update: if docId == 'members' || docId == 'game';
+      allow read:           if request.auth != null;
+      allow delete:         if false;
+      allow create, update: if request.auth != null && (docId == 'members' || docId == 'game');
     }
     match /season/{docId} {
-      allow read: if true;
-      allow delete: if false;
-      allow create, update: if docId == 'totals';
+      allow read:           if request.auth != null;
+      allow delete:         if false;
+      allow create, update: if request.auth != null && docId == 'totals';
     }
   }
 }
@@ -292,6 +302,8 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ```
 /
 ├── ipl-fantasy-v4_render.html   # The entire app — single HTML file
+├── firestore.rules              # Firestore security rules (version-controlled)
+├── netlify.toml                 # Netlify deploy config + security headers
 ├── skillipl.md                  # Project intelligence / architecture doc
 ├── StepByStepGuide              # Detailed setup walkthrough
 └── README.md                    # This file
@@ -300,6 +312,34 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.6.2 — April 24, 2026
+- **Firebase Anonymous Auth**: App now signs every visitor in silently with Firebase Anonymous Auth before any Firestore read. Firestore rules updated to require `request.auth != null` on all reads and writes — bots and direct API queries can no longer access the database without first loading and executing the app.
+
+### v3.6.1 — April 24, 2026
+- **Mobile: duplicate font load removed** — Google Fonts `@import` inside CSS eliminated; fonts now load only once via the `<link>` in `<head>`, halving font download on first visit.
+- **Mobile: toast safe-area fix** — Toast `bottom` position now uses `max(20px, env(safe-area-inset-bottom, 20px))` so it clears the iPhone home indicator on all modern iPhones.
+- **Mobile: recent overs scroll** — Added `-webkit-overflow-scrolling: touch` and `overscroll-behavior-x: contain` to `.csb-recent-overs` for smooth iOS momentum scroll.
+- **Mobile: touch target fix** — `.btn-ghost` and `.btn-sm` now have `min-height: 44px` in the touch media query, meeting Apple HIG and Material minimum tap-target sizes.
+
+### v3.6.0 — April 24, 2026
+- **Name validation**: Member names containing `.` `[` `]` `#` `$` `/` are now rejected at join time — prevents dot-path corruption in booster `updateDoc` writes where `.` is treated as a Firestore field separator.
+- **Session timeout**: Sessions older than 10 hours are automatically cleared on boot — removed members can no longer stay logged in indefinitely.
+- **Error message hygiene**: Boot-time Firebase errors now show a generic "could not connect" message instead of leaking collection names/paths; `e.message` in match-list innerHTML is now escaped with `escHtml()`.
+- **Security headers**: Added `netlify.toml` with `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-XSS-Protection` for all routes.
+- **Firestore rules**: Added `firestore.rules` to the repo — rules are now version-controlled with full audit history and rollback capability.
+
+### v3.5.9 — April 24, 2026
+- **XSS hardening**: Wrapped all unescaped `p.name` / `match.label` / `shortName(m.name)` innerHTML insertions with `escHtml()` across My Team card, Player Stats card, player selection card, admin pool chip, match option list, and history modal title.
+- **Race condition fix**: `setDoc` on `meta/members` at join and admin profile save now uses `{ merge: true }` — prevents a simultaneous join from overwriting another member's data.
+- **Supply chain**: Added SRI hash (`sha384`) to the canvas-confetti CDN script tag.
+- **CSS**: Removed orphaned closing `}` that was causing an IDE parse error in the mobile performance media query block.
+- **Input hardening**: Added `maxlength="30"` to member name, join name, and join team name inputs.
+
+### v3.5.8 — April 24, 2026
+- **Match Info tab**: Added a standalone 6th tab showing the live batting and bowling scorecard. Tab is conditionally rendered — it only appears when a match is live (`locked && !finalized && !matchEnded`) and disappears automatically when the match ends. Positioned between "My Team" and "Live Scores" in member view, and between "Current Match" and "Player Stats" in admin view. RAF-based DOM patch keeps it in sync with every auto-fetch cycle.
+- **Live score fix**: Fixed a crash (`ReferenceError: _isIPL is not defined`) that occurred during live stat fetches. The v3.5.4 bowling-overs guard incorrectly used a local variable `_isIPL` from `renderPlayerGrid`; replaced with the module-scope `_matchType === "ipl"` check.
+- **Score readability**: Team score in the Match Info innings header now renders in white instead of the team's primary colour, which was unreadable on dark backgrounds for several team palettes.
 
 ### v3.5.7 — April 23, 2026
 - **Audit-Driven Stability**: Refactored match finalization to use atomic `writeBatch` transactions.
