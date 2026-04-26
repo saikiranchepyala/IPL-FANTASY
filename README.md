@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.6.8** — [Changelog](#-changelog)
+**Current version: v3.6.9** — [Changelog](#-changelog)
 
 ---
 
@@ -312,6 +312,12 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.6.9 — April 26, 2026
+**Visual & Live Feed Enhancements**
+- **Player Thumbnails**: Added circular player images to selection cards and "My Team" view.
+- **Global Ticker**: Real-time scrolling scoreboard for other active IPL matches (Live Tab).
+- **Venue Metadata**: Match header now displays the stadium venue automatically pulled from CricAPI.
 
 ### v3.6.8 — April 25, 2026
 **Network & Stats Resilience**

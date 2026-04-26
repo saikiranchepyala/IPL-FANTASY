@@ -537,6 +537,7 @@
         if (!data) throw new Error("Career data unavailable for this player");
 
         const profile = {
+          id: player.id, // Store ID for thumbnail URL
           name: data.name,
           role: data.role || "N/A",
           battingStyle: data.battingStyle || "",
@@ -1068,6 +1069,10 @@
           const app = initializeApp(FIREBASE_CONFIG);
           db = getFirestore(app);
           showScreen("loading");
+          
+          // Start Global Ticker (low-cost summary feed)
+          fetchGlobalTicker();
+          setInterval(fetchGlobalTicker, 300000); // 5 min interval
 
 
           // Init meta/game if needed
@@ -1960,8 +1965,8 @@
         ${viewMatch.t2img ? `<img src="${viewMatch.t2img}" class="match-flag">` : ""}
       </div>
       <div class="match-title">${viewMatch.label || "–"}</div>
-    </div>
-  </div>
+      ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
+      </div>  </div>
 
   ${
     xiReady && !locked
@@ -2169,6 +2174,7 @@
           const bstBadge = bstChipForPlayer(booster, p.name, pTeamKey, true);
           return `<div class="mtc-row ${p.isC ? "mtc-c" : p.isV ? "mtc-v" : ""}">
       <div class="mtc-role">${ri[p.role] || ""}</div>
+      <img src="https://h.cricapi.com/img/players/${p.id || 'default'}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
       <div class="mtc-info">
         <div class="mtc-name">
           ${badgeClass ? `<span class="badge-status ${badgeClass}">${badgeLabel}</span>` : ""}
@@ -2613,15 +2619,19 @@
         const noMatch = !liveMid || !liveMatch.label;
         if (noMatch)
           return `<div class="empty-state"><div class="es-icon">📺</div><p class="muted">No match in progress.</p></div>`;
+        const ticker = renderLiveTicker();
         const scoreBar = renderScoreBar(liveMatch);
         if (!liveMatch.revealed)
           return (
+            ticker + 
             scoreBar +
             `<div class="empty-state"><div class="es-icon">🔒</div><p>Fantasy leaderboard appears once the match starts.</p></div>`
           );
-
+        
         const userTeam = (liveMatch.teams || {})[session.name] || {};
+        const ticker = renderLiveTicker();
         const toggleBtn = `
+          ${ticker}
           <div class="pv-toggle-row">
             <button class="pv-toggle-btn ${_liveView === "leaderboard" ? "pv-toggle-active" : ""}"
               onclick="window._setLiveView('leaderboard')">📊 Leaderboard</button>
@@ -4386,7 +4396,10 @@
       ${fgnFull && !teamFull && !xiFull ? '<div class="team-cap-badge" style="background:#2563eb">4/4</div>' : ""}
       ${overBudget && !xiFull && !teamFull && !fgnFull ? '<div class="team-cap-badge" style="background:var(--muted)">💸</div>' : ""}
       <div class="pc-role">${ri[mappedRole] || ""} ${mappedRole}</div>
-      <div class="pc-name">${escHtml(p.name)}</div>
+      <div class="pc-main">
+        <img src="https://h.cricapi.com/img/players/${p.id || 'default'}.jpg" class="pthumb" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+        <div class="pc-name">${escHtml(p.name)}</div>
+      </div>
       ${isFgn && isIPLMatch() ? '<div class="pc-overseas-tag">FOREIGN</div>' : ""}
       <div class="pc-footer">
         <span class="pc-team">${normalizeTeam(p.team)}${counts[p.team] && !s ? ` <span class="team-cnt">${counts[p.team]}/${MAX_PER_TEAM}</span>` : ""}</span>
@@ -5063,8 +5076,8 @@
               ${viewMatch.t2img ? `<img src="${viewMatch.t2img}" class="match-flag">` : ""}
             </div>
             <div class="match-title">${viewMatch.label || "–"}</div>
-          </div>
-        </div>
+            ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
+            </div>        </div>
         ${renderScoreBar(viewMatch)}
         ${
           otherActiveMatches.length
@@ -8456,7 +8469,8 @@
         list.querySelectorAll("button[data-id]").forEach((b) => {
           b.onclick = async () => {
             const mid = b.dataset.id,
-              mname = b.dataset.name;
+              mname = b.dataset.name,
+              venue = b.dataset.venue;
             const t1 = b.dataset.t1 || "",
               t2 = b.dataset.t2 || "";
             const t1img = b.dataset.t1img || "";
@@ -8505,6 +8519,7 @@
               if (doUpdate) {
                 await updateDoc(doc(db, "matches", fuzzyMid), {
                   liveMatchId: mid,
+                  venue,
                 });
                 await updateDoc(doc(db, "meta", "game"), { cricApiKey: key });
                 adminSelectedMatchId = fuzzyMid;
@@ -8532,6 +8547,7 @@
               (await getDocs(collection(db, "matches"))).size + 1;
             await setDoc(doc(db, "matches", newMid), {
               label: mname,
+              venue,
               t1,
               t2,
               t1img,
@@ -8627,7 +8643,7 @@
       <div class="mopt-st">${status}${timeStr}</div>
       ${!hasSquad && !m.matchStarted ? '<div class="mopt-warn">⚠ Squad not announced yet — you can still select and add players manually</div>' : ""}
     </div>
-    <button class="btn-sm" data-id="${m.id}" data-name="${m.name || "Match"}" data-t1="${(m.teamInfo?.[0]?.name || m.teams?.[0] || "").replace(/"/g, "")}" data-t2="${(m.teamInfo?.[1]?.name || m.teams?.[1] || "").replace(/"/g, "")}" data-t1img="${m.teamInfo?.[0]?.img || ""}" data-t2img="${m.teamInfo?.[1]?.img || ""}" data-fantasy="${m.fantasyEnabled === true ? "1" : "0"}">Select</button>
+    <button class="btn-sm" data-id="${m.id}" data-name="${m.name || "Match"}" data-venue="${m.venue || ""}" data-t1="${(m.teamInfo?.[0]?.name || m.teams?.[0] || "").replace(/"/g, "")}" data-t2="${(m.teamInfo?.[1]?.name || m.teams?.[1] || "").replace(/"/g, "")}" data-t1img="${m.teamInfo?.[0]?.img || ""}" data-t2img="${m.teamInfo?.[1]?.img || ""}" data-fantasy="${m.fantasyEnabled === true ? "1" : "0"}">Select</button>
   </div>`;
       }
 
@@ -9922,6 +9938,33 @@
   </nav>`;
       }
       // ── Sticky Score Pill ──
+      let globalTickerData = [];
+      async function fetchGlobalTicker() {
+        try {
+          const cKey = (metaGame || {}).cricApiKey;
+          if (!cKey) return;
+          const res = await _cricFetch(`https://api.cricapi.com/v1/currentMatches?apikey=${cKey}&offset=0`);
+          if (res && res.status === "success") {
+            // Filter only IPL matches or other relevant T20s
+            globalTickerData = (res.data || []).filter(m => 
+              m.matchStarted && !m.matchEnded && (m.name.includes("IPL") || m.name.includes("Premier League"))
+            );
+            if (globalTickerData.length > 0 && activeTab === "live") _doRefresh();
+          }
+        } catch (e) { console.warn("[Ticker] Fetch failed", e); }
+      }
+
+      function renderLiveTicker() {
+        if (!globalTickerData || globalTickerData.length === 0) return "";
+        const items = globalTickerData.map(m => {
+          const score = m.score ? m.score.map(s => `${s.inning}: ${s.r}/${s.w} (${s.o})`).join(" · ") : "Starting soon";
+          return `<div class="ticker-item"><span class="ticker-live">LIVE</span> ${escHtml(m.name.split(',')[0])}: <span class="ticker-score">${score}</span></div>`;
+        }).join("");
+        
+        // Duplicate items for seamless loop
+        return `<div class="ticker-wrap"><div class="ticker">${items}${items}</div></div>`;
+      }
+
       function renderScorePill() {
         const mid = getActiveMid();
         const match = getMatch(mid);
@@ -17184,6 +17227,58 @@
             @keyframes pst-spin { to { transform: rotate(360deg); } }
             
             .pst-error { color: #ef4444; text-align: center; padding: 20px; font-size: 14px; }
+            /* ── LIVE TICKER ── */
+            .ticker-wrap {
+              width: 100%;
+              overflow: hidden;
+              background: rgba(0,0,0,0.3);
+              border-bottom: 1px solid var(--glass-border);
+              padding: 6px 0;
+              margin-bottom: 12px;
+              white-space: nowrap;
+            }
+            .ticker {
+              display: inline-flex;
+              gap: 24px;
+              animation: ticker-scroll 30s linear infinite;
+            }
+            .ticker-item {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              font-family: 'DM Mono', monospace;
+              font-size: 11px;
+              color: var(--muted2);
+            }
+            .ticker-score { color: var(--white); font-weight: 700; }
+            .ticker-live { color: #ef4444; font-weight: 800; font-size: 8px; animation: breathing 1.5s ease-in-out infinite; }
+            @keyframes ticker-scroll {
+              0% { transform: translateX(0); }
+              100% { transform: translateX(-50%); }
+            }
+
+            /* ── PLAYER THUMBNAILS ── */
+            .pthumb {
+              width: 32px;
+              height: 32px;
+              border-radius: 50%;
+              background: var(--s2);
+              border: 1px solid rgba(255,255,255,0.1);
+              object-fit: cover;
+              flex-shrink: 0;
+            }
+            .pc-main { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+            .mtc-row { display: flex; align-items: center; gap: 10px; }
+
+            /* ── MATCH HEADER REFINEMENTS ── */
+            .match-venue {
+              font-family: 'Barlow Condensed', sans-serif;
+              font-size: 10px;
+              color: var(--muted2);
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              margin-top: 2px;
+            }
     </style>
   </head>
   <body>

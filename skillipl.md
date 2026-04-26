@@ -1,12 +1,32 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.6.8"
+version: "3.6.9"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.6.8 — Project Intelligence
+# IPL Fantasy League v3.6.9 — Project Intelligence
+
+## 📺 Visual & Live Feed Enhancements (v3.6.9 — April 26, 2026)
+
+**Goal**: Professional broadcast-style visuals and real-time awareness.
+
+### Feature 1 — Player Thumbnails
+Added circular player images to both the selection grid and the "My Team" card.
+- **Source**: Dynamically pulls from CricAPI's image CDN using the player's unique ID.
+- **Fallback**: Implemented an elegant SVG placeholder for players without an API image.
+
+### Feature 2 — Global Live Ticker
+Introduced a horizontal scrolling ticker at the top of the "Live Scores" tab.
+- **Efficiency**: Calls the `currentMatches` endpoint every 5 minutes (costs only 1 credit for all active games).
+- **Awareness**: Keeps members informed of other concurrent IPL scores without leaving the app.
+
+### Feature 3 — Venue & Match Metadata
+The `match-bar` (header) now explicitly displays the match venue (e.g., 🏟️ Wankhede Stadium).
+- **Automation**: Admin match-selection logic updated to automatically capture and store venue metadata from the API during setup.
+
+---
 
 ## 🚀 Network & Stats Resilience (v3.6.8 — April 25, 2026)
 
