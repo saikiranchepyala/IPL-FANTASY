@@ -932,18 +932,16 @@
         if (session.isAdmin) adminAutoSyncPlayerIds();
       }
 
-      async function adminAutoSyncPlayerIds() {
+      window.adminAutoSyncPlayerIds = async function () {
         const mid = getActiveMid();
         const m = getMatch(mid);
         const players = getPlayers(mid);
         if (!mid || !m || !players.length || m.finalized) return;
         
-        const missingCount = players.filter(p => !p.id).length;
         if (window._syncingIds === mid) return;
         
         window._syncingIds = mid;
         toast("🔄 Syncing player photos...");
-        console.log(`[Sync] Attempting to backfill IDs for ${m.label}...`);
         
         try {
           const cKey = (metaGame || {}).cricApiKey;
@@ -951,7 +949,7 @@
           
           const idMap = {};
           
-          // 1. Try Match Info first (Works for upcoming matches!)
+          // 1. Match Info (upcoming)
           const infoRes = await _cricFetch(`https://api.cricapi.com/v1/match_info?apikey=${cKey}&id=${m.liveMatchId}`);
           if (infoRes.status === "success" && infoRes.data?.teamInfo) {
             infoRes.data.teamInfo.forEach(t => {
@@ -959,7 +957,7 @@
             });
           }
 
-          // 2. Fallback to Scorecard (If match has started/ended)
+          // 2. Scorecard (live/ended)
           if (Object.keys(idMap).length < 5) {
             const scRes = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${cKey}&id=${m.liveMatchId}`);
             if (scRes.status === "success" && scRes.data?.scorecard) {
@@ -970,15 +968,12 @@
             }
           }
 
-          if (Object.keys(idMap).length === 0) {
-            throw new Error("No player data available in API for this match yet.");
-          }
+          if (Object.keys(idMap).length === 0) throw new Error("No player data in API yet.");
           
           let foundAny = false;
           const updatedPlayers = players.map(p => {
             const name = p.name.toLowerCase();
             const lastName = name.split(' ').pop();
-            // Try full name match, then last name match
             const newId = p.id || idMap[name] || Object.keys(idMap).find(k => k.endsWith(lastName) && lastName.length > 4);
             if (newId && !p.id) foundAny = true;
             return { ...p, id: newId || null };
@@ -987,18 +982,17 @@
           if (foundAny) {
             await updateDoc(doc(db, "matches", mid), { players: updatedPlayers });
             saveToPlayerCache(updatedPlayers);
-            toast("✅ Player images synchronized!", "ok");
+            toast("✅ Photos synced!", "ok");
             refreshView();
           } else {
-            toast("ℹ️ All available images already synced.", "info");
+            toast("ℹ️ All images already synced.", "info");
           }
         } catch (e) { 
-          console.warn("[Sync] ID backfill failed:", e.message); 
           toast("⚠️ Sync failed: " + e.message, "err");
         } finally { 
           delete window._syncingIds; 
         }
-      }
+      };
 
       // Auto-refresh
       let arIntervalTimer = null,
@@ -4488,7 +4482,12 @@
       ${overBudget && !xiFull && !teamFull && !fgnFull ? '<div class="team-cap-badge" style="background:var(--muted)">💸</div>' : ""}
       <div class="pc-role">${ri[mappedRole] || ""} ${mappedRole}</div>
       <div class="pc-main">
-        <img src="https://h.cricapi.com/img/players/${p.id || PLAYER_CACHE[p.name] || 'default'}.jpg" class="pthumb" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+        ${(() => {
+          const pid = p.id || PLAYER_CACHE[p.name];
+          const src = pid ? `https://h.cricapi.com/img/players/${pid}.jpg` : "";
+          const placeholder = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+";
+          return `<img src="${src}" class="pthumb" onerror="this.onerror=null; this.src='${placeholder}'" style="${!src ? 'display:none' : ''}">` + (!src ? `<div class="pthumb" style="display:flex;align-items:center;justify-content:center;background:var(--s2)"><img src="${placeholder}" style="width:20px;opacity:0.5"></div>` : '');
+        })()}
         <div class="pc-name">${escHtml(p.name)}</div>
       </div>
       ${isFgn && isIPLMatch() ? '<div class="pc-overseas-tag">FOREIGN</div>' : ""}
