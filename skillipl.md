@@ -1,12 +1,28 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.1"
+version: "3.7.2"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.1 — Project Intelligence
+# IPL Fantasy League v3.7.2 — Project Intelligence
+
+## 🛡️ Security & Stability Patch (v3.7.2 — April 26, 2026)
+
+**Goal**: Align code with hardened Firestore rules and block XSS vectors.
+
+### Fix 1 — Anonymous Auth Restoration
+Re-implemented `signInAnonymously()` in the `boot()` sequence. This ensures all users have a valid Firebase UID before interacting with the database, satisfying the `request.auth != null` requirement in `firestore.rules`.
+
+### Fix 2 — XSS Shielding (Event Delegation)
+Removed all inline `onclick` handlers for player stats. Switched to a safe data-attribute pattern (`data-pname`) with global event delegation.
+- **Sanitization**: Applied `escHtml()` to all API-driven fields including player metadata, career stats, and match venues.
+
+### Fix 3 — Runtime Crash Prevention
+Removed the `.catch(() => null)` pattern from asynchronous `_cricFetch` calls. Errors now propagate correctly to `try/catch` blocks, preventing "Cannot read properties of null" crashes during network interruptions.
+
+---
 
 ## 🛠️ Performance & Stability (v3.7.1 — April 26, 2026)
 
