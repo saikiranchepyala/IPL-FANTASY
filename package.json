@@ -1,0 +1,25 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "A private, self-hosted IPL fantasy league web app for friend groups. Built as a **single HTML file** — no backend server needed, no app store, no subscriptions. Just Firebase + Netlify, both free.",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saikiranchepyala/IPL-FANTASY.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/saikiranchepyala/IPL-FANTASY/issues"
+  },
+  "homepage": "https://github.com/saikiranchepyala/IPL-FANTASY#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "playwright": "^1.59.1"
+  }
+}
