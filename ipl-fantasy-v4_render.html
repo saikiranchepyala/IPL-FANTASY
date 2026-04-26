@@ -6148,14 +6148,6 @@
           return null;
         }
 
-        function toRealOvers(o) {
-          const val = parseFloat(o) || 0;
-          if (val > 10) return 0; // Safety guard: no bowler bowls > 10 overs in T20/IPL
-          const w = Math.floor(val),
-            b = Math.round((val - w) * 10);
-          return w + Math.min(b, 6) / 6;
-        }
-
         const batAcc = {},
           bowlAcc = {},
           catchAcc = {};
@@ -8050,7 +8042,7 @@
                 [...autoSids].map((sid) =>
                   _cricFetch(
                     `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${sid}`,
-                  ).then((r) => r.json()),
+                  ).catch(() => null),
                 ),
               );
               const autoSeen = new Set(allMatches.map((m) => m.id));
