@@ -968,6 +968,19 @@
             }
           }
 
+          if (Object.keys(idMap).length === 0) {
+            console.log("[Sync] Match-level data missing. Trying Global Name Search fallback...");
+            // Only search first 10 players to avoid hitting quota too hard
+            const searchSlice = players.filter(p => !p.id).slice(0, 15);
+            for (const p of searchSlice) {
+              try {
+                const sRes = await _cricFetch(`https://api.cricapi.com/v1/players?apikey=${cKey}&offset=0&search=${encodeURIComponent(p.name)}`);
+                const found = (sRes.data || []).find(f => f.name.toLowerCase() === p.name.toLowerCase()) || sRes.data?.[0];
+                if (found) idMap[p.name.toLowerCase()] = found.id;
+              } catch(e) {}
+            }
+          }
+
           if (Object.keys(idMap).length === 0) throw new Error("No player data in API yet.");
           
           let foundAny = false;
