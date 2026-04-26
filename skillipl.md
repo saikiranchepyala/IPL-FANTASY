@@ -1,12 +1,30 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.0"
+version: "3.7.1"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.0 — Project Intelligence
+# IPL Fantasy League v3.7.1 — Project Intelligence
+
+## 🛠️ Performance & Stability (v3.7.1 — April 26, 2026)
+
+**Goal**: Polish and harden all new features for 100% reliability.
+
+### Fix 1 — API Consistency
+Standardized `_cricFetch` to return parsed JSON directly. Removed all redundant `.json()` calls across the 17k+ line codebase to prevent "r.json is not a function" runtime crashes.
+
+### Fix 2 — Foolproof Thumbnail Sync
+Overhauled the player image synchronization engine:
+- **Global Search Fallback**: If a match-level ID is missing, the app now searches the entire CricAPI database for a name match.
+- **Manual 🔄 Button**: Added a dedicated sync button in the Admin tab for on-demand photo population.
+- **Global Cache**: Implemented `ipl_player_cache` in `localStorage` so player IDs are remembered across sessions.
+
+### Fix 3 — CORB Security Bypass
+Redesigned image rendering to use a safe Data URI placeholder instead of broken remote URLs, preventing browser-level security blocks (CORB/CORS).
+
+---
 
 ## 📸 Professional Player Profiles (v3.7.0 — April 26, 2026)
 

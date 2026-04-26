@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.7.0
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.7.1
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -283,6 +283,12 @@ Rules:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TROUBLESHOOTING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Player images not showing up
+  → Go to Admin tab → Current Match.
+  → Click the 🔄 button next to "Find IPL Matches". 
+  → This will look up official IDs and populate headshots for all players.
+  → Refresh the page after the sync completes.
 
 "API Connection Failed" or "Failed to Fetch"
   → 1. Ensure you are running from http://localhost or Netlify (not file://).

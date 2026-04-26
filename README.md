@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.7.0** — [Changelog](#-changelog)
+**Current version: v3.7.1** — [Changelog](#-changelog)
 
 ---
 
@@ -312,6 +312,13 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.7.1 — April 26, 2026
+**Performance & Stability**
+- **API Engine Hardening**: Removed redundant JSON parsing calls across the entire application to prevent "r.json is not a function" errors.
+- **Manual 🔄 Sync Button**: Added a force-sync button for player images in the Admin tab.
+- **Global ID Cache**: Player IDs are now persisted in `localStorage`, ensuring images load faster on repeat visits.
+- **Security Fix**: Bypassed CORB blocks for player images by implementing safe SVG fallbacks.
 
 ### v3.7.0 — April 26, 2026
 **Professional Player Profiles**
