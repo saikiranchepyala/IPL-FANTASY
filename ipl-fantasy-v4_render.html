@@ -51,6 +51,10 @@
         writeBatch,
         serverTimestamp,
       } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+      import {
+        getAuth,
+        signInAnonymously,
+      } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
       window.getActiveMid = () => (typeof getActiveMid === "function" ? getActiveMid() : null);
       window.getMatch = (mid) => (typeof getMatch === "function" ? getMatch(mid) : null);
@@ -481,7 +485,7 @@
         }
         
         const content = document.getElementById("pstContent");
-        content.innerHTML = `<div class="pst-loading"><div class="pst-spinner"></div><div class="pst-meta">Fetching ${name}...</div></div>`;
+        content.innerHTML = `<div class="pst-loading"><div class="pst-spinner"></div><div class="pst-meta">Fetching ${escHtml(name)}...</div></div>`;
         
         ov.classList.add("pst-overlay-open");
         setTimeout(() => ov.querySelector(".pst-sheet").classList.add("pst-sheet-open"), 10);
@@ -491,7 +495,7 @@
           if (!profile) throw new Error("Profile not found");
           renderProfileContent(content, profile);
         } catch (e) {
-          content.innerHTML = `<div class="pst-error">⚠️ ${e.message || "Failed to load player stats"}</div>`;
+          content.innerHTML = `<div class="pst-error">⚠️ ${escHtml(e.message || "Failed to load player stats")}</div>`;
         }
       };
 
@@ -501,6 +505,16 @@
         ov.querySelector(".pst-sheet").classList.remove("pst-sheet-open");
         setTimeout(() => ov.classList.remove("pst-overlay-open"), 300);
       };
+
+      // Event Delegation for Stats Buttons (Security & Performance)
+      document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".pc-stats-btn, .mtc-stats-btn");
+        if (btn) {
+          e.stopPropagation();
+          const name = btn.dataset.pname;
+          if (name) window.showPlayerProfile(name);
+        }
+      });
 
       async function fetchAndCacheProfile(name) {
         // 1. Memory Cache
@@ -573,12 +587,12 @@
             <div class="pst-section">
               <div class="pst-sec-title">${title}</div>
               <div class="pst-grid">
-                <div class="pst-stat"><span class="pst-stat-val">${m}</span><span class="pst-stat-lbl">Matches</span></div>
-                <div class="pst-stat"><span class="pst-stat-val">${findStat(type, "batting", "runs")}</span><span class="pst-stat-lbl">Runs</span></div>
-                <div class="pst-stat"><span class="pst-stat-val">${findStat(type, "bowling", "wkts")}</span><span class="pst-stat-lbl">Wkts</span></div>
-                <div class="pst-stat"><span class="pst-stat-val">${findStat(type, "batting", "sr")}</span><span class="pst-stat-lbl">S/R</span></div>
-                <div class="pst-stat"><span class="pst-stat-val">${findStat(type, "bowling", "econ")}</span><span class="pst-stat-lbl">Econ</span></div>
-                <div class="pst-stat"><span class="pst-stat-val">${findStat(type, "batting", "100s")}</span><span class="pst-stat-lbl">100s</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(m)}</span><span class="pst-stat-lbl">Matches</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(findStat(type, "batting", "runs"))}</span><span class="pst-stat-lbl">Runs</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(findStat(type, "bowling", "wkts"))}</span><span class="pst-stat-lbl">Wkts</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(findStat(type, "batting", "sr"))}</span><span class="pst-stat-lbl">S/R</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(findStat(type, "bowling", "econ"))}</span><span class="pst-stat-lbl">Econ</span></div>
+                <div class="pst-stat"><span class="pst-stat-val">${escHtml(findStat(type, "batting", "100s"))}</span><span class="pst-stat-lbl">100s</span></div>
               </div>
             </div>`;
         };
@@ -589,8 +603,8 @@
         container.innerHTML = `
           <div class="pst-header">
             <div class="pst-name">${escHtml(p.name)}</div>
-            <div class="pst-meta">${p.country || ""} · ${p.role || ""}</div>
-            <div style="font-size:11px;color:var(--muted2);margin-top:4px">${p.battingStyle || ""} ${p.bowlingStyle ? " · " + p.bowlingStyle : ""}</div>
+            <div class="pst-meta">${escHtml(p.country || "")} · ${escHtml(p.role || "")}</div>
+            <div style="font-size:11px;color:var(--muted2);margin-top:4px">${escHtml(p.battingStyle || "")} ${p.bowlingStyle ? " · " + escHtml(p.bowlingStyle) : ""}</div>
           </div>
           ${iplHtml || t20iHtml ? iplHtml + t20iHtml : `<div class="pst-error">No IPL/T20I career stats found.</div>`}
         `;
@@ -1145,6 +1159,10 @@
         try {
           const app = initializeApp(FIREBASE_CONFIG);
           db = getFirestore(app);
+          
+          // Restore Anonymous Auth
+          await signInAnonymously(getAuth(app));
+          
           showScreen("loading");
           
           // Start Global Ticker (low-cost summary feed)
@@ -2261,7 +2279,7 @@
           ${p.isV ? '<span class="mtc-badge mtc-badge-v">VC</span>' : ""}
           ${bstBadge}
         </div>
-        <div class="mtc-meta">${normalizeTeam(p.team)} · <span style="color:var(--gold)">${p.cr}CR</span>${avail === "notplaying" ? '<span style="color:var(--red);margin-left:6px;font-size:10px">NOT PLAYING</span>' : avail === "impact" ? '<span style="color:#f59e0b;margin-left:6px;font-size:10px;font-weight:800">⚡ IMPACT</span>' : ""}<button class="mtc-stats-btn" onclick="showPlayerProfile('${escAttr(p.name)}')">STATS</button></div>      </div>
+        <div class="mtc-meta">${normalizeTeam(p.team)} · <span style="color:var(--gold)">${p.cr}CR</span>${avail === "notplaying" ? '<span style="color:var(--red);margin-left:6px;font-size:10px">NOT PLAYING</span>' : avail === "impact" ? '<span style="color:#f59e0b;margin-left:6px;font-size:10px;font-weight:800">⚡ IMPACT</span>' : ""}<button class="mtc-stats-btn" data-pname="${escAttr(p.name)}">STATS</button></div>      </div>
       ${finalPts !== null ? `<div class="mtc-pts">${Math.round(finalPts)}<span>pts</span></div>` : ""}
     </div>`;
         };
@@ -4507,7 +4525,7 @@
       <div class="pc-footer">
         <span class="pc-team">${normalizeTeam(p.team)}${counts[p.team] && !s ? ` <span class="team-cnt">${counts[p.team]}/${MAX_PER_TEAM}</span>` : ""}</span>
         <span class="pc-cr ${tierClass}">${cr} CR</span>
-        <button class="pc-stats-btn" onclick="event.stopPropagation(); showPlayerProfile('${escAttr(p.name)}')">STATS</button>
+        <button class="pc-stats-btn" data-pname="${escAttr(p.name)}">STATS</button>
       </div>
       ${avail === "notplaying" ? '<div class="pcard-np-label">✕ NOT PLAYING</div>' : ""}
     </div></div>`;
@@ -5179,7 +5197,7 @@
               ${viewMatch.t2img ? `<img src="${viewMatch.t2img}" class="match-flag">` : ""}
             </div>
             <div class="match-title">${viewMatch.label || "–"}</div>
-            ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
+            ${viewMatch.venue ? `<div class="match-venue">🏟️ ${escHtml(viewMatch.venue)}</div>` : ""}
           </div>
         </div>
         ${renderScoreBar(viewMatch)}
@@ -7878,7 +7896,7 @@
           // Step 1 — currentMatches (live + recent ~48hrs)
           const r1 = await _cricFetch(
             `https://api.cricapi.com/v1/currentMatches?apikey=${key}&offset=0`,
-          ).catch(() => null);
+          );
           if (r1.status !== "success")
             throw new Error(r1.reason || "API error — check your key");
           const current = r1.data || [];
@@ -7936,7 +7954,7 @@
             seriesIds.map((sid) =>
               _cricFetch(
                 `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${sid}`,
-              ).catch(() => null),
+              ),
             ),
           );
 
@@ -8027,7 +8045,7 @@
                 autoQueries.map((q) =>
                   _cricFetch(
                     `https://api.cricapi.com/v1/series?apikey=${key}&offset=0&search=${encodeURIComponent(q)}`,
-                  ).catch(() => null),
+                  ),
                 ),
               );
               const autoSids = new Set();
@@ -8162,7 +8180,7 @@
         try {
           const r = await _cricFetch(
             `https://api.cricapi.com/v1/series?apikey=${key}&offset=0&search=${encodeURIComponent(query)}`,
-          ).catch(() => null);
+          );
           if (r.status !== "success")
             throw new Error(r.reason || "Series search failed");
           const series = r.data || [];
@@ -8175,7 +8193,7 @@
               .map((s) =>
               _cricFetch(
                 `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${s.id}`,
-              ).catch(() => null),
+              ),
               ),
           );
 
@@ -8993,7 +9011,7 @@
         try {
           const scData = await _cricFetch(
             `https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`,
-          ).catch(() => null);
+          );
 
           if (scData.status !== "success") {
             // Scorecard endpoint failed — fall back to match_info for score/status/XI.
@@ -9001,7 +9019,7 @@
             console.warn("[Poller] Scorecard unavailable:", scData.reason, "— falling back to match_info");
             const infoFallback = await _cricFetch(
               `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
-            ).catch(() => null);
+            );
             if (infoFallback.status === "success") {
               const fbScore  = infoFallback.data?.score   || [];
               const fbStatus = infoFallback.data?.status  || "";
@@ -9268,7 +9286,7 @@
               try {
                 const retryData = await _cricFetch(
                   `https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`,
-                ).catch(() => null);
+                );
                 if (retryData.status === "success" && (retryData.data?.scorecard || []).length > 0) {
                   // Got the final scorecard — splice it back in and continue processing
                   scData.data = retryData.data;
