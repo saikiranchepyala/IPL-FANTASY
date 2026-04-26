@@ -938,33 +938,55 @@
         const players = getPlayers(mid);
         if (!mid || !m || !players.length || m.finalized) return;
         
-        // Only run if at least 5 players are missing IDs (means it's an old match)
+        // Lowered threshold: Sync if any player is missing an ID
         const missingCount = players.filter(p => !p.id).length;
-        if (missingCount < 5 || window._syncingIds === mid) return;
+        if (missingCount === 0 || window._syncingIds === mid) return;
         
         window._syncingIds = mid;
-        console.log(`[Sync] Backfilling player IDs for ${m.label}...`);
+        console.log(`[Sync] Attempting to backfill ${missingCount} player IDs for ${m.label}...`);
         
         try {
           const cKey = (metaGame || {}).cricApiKey;
           if (!cKey || !m.liveMatchId) return;
           
           const res = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${cKey}&id=${m.liveMatchId}`);
-          if (!res || res.status !== "success" || !res.data || !res.data.scorecard) return;
+          if (!res || res.status !== "success" || !res.data || !res.data.scorecard) {
+             console.warn("[Sync] Scorecard not available for ID matching yet.");
+             return;
+          }
           
           const idMap = {};
           res.data.scorecard.forEach(inning => {
-            (inning.batting || []).forEach(b => { if(b.batsman) idMap[b.batsman.name] = b.batsman.id; });
-            (inning.bowling || []).forEach(b => { if(b.bowler) idMap[b.bowler.name] = b.bowler.id; });
+            (inning.batting || []).forEach(b => { 
+              if(b.batsman) {
+                idMap[b.batsman.name.toLowerCase()] = b.batsman.id;
+                // Also map short versions
+                const parts = b.batsman.name.split(' ');
+                idMap[parts[parts.length-1].toLowerCase()] = b.batsman.id;
+              }
+            });
+            (inning.bowling || []).forEach(b => { 
+              if(b.bowler) {
+                idMap[b.bowler.name.toLowerCase()] = b.bowler.id;
+                const parts = b.bowler.name.split(' ');
+                idMap[parts[parts.length-1].toLowerCase()] = b.bowler.id;
+              }
+            });
           });
           
-          const updatedPlayers = players.map(p => ({
-            ...p,
-            id: p.id || idMap[p.name] || null
-          }));
+          let foundAny = false;
+          const updatedPlayers = players.map(p => {
+            const name = p.name.toLowerCase();
+            const lastName = name.split(' ').pop();
+            const newId = p.id || idMap[name] || idMap[lastName];
+            if (newId && !p.id) foundAny = true;
+            return { ...p, id: newId || null };
+          });
           
-          await updateDoc(doc(db, "matches", mid), { players: updatedPlayers });
-          console.log(`[Sync] Successfully backfilled player IDs.`);
+          if (foundAny) {
+            await updateDoc(doc(db, "matches", mid), { players: updatedPlayers });
+            toast("✅ Player images synchronized!");
+          }
         } catch (e) { console.warn("[Sync] ID backfill failed", e); }
         finally { delete window._syncingIds; }
       }
@@ -5252,6 +5274,7 @@
             <div class="step-label">Find & Select Match</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
               <button class="btn-sm" id="fetchMatchBtn" onclick="fetchMatches()" style="flex:1">${currentMatch.matchType === "international" ? "🌍 Find International" : currentMatch.matchType === "domestic" ? "🏟️ Find Domestic" : "🏏 Find IPL Matches"}</button>
+              <button class="btn-sm btn-ghost" onclick="adminAutoSyncPlayerIds()" title="Re-sync player images from scorecard" style="width:40px">🔄</button>
             </div>
             <div class="ss-row">
               <input id="seriesSearchInp" class="sinp" style="margin:0;flex:1" placeholder="Or search series name e.g. NZ South Africa 2026" onkeydown="if(event.key==='Enter')searchSeriesMatches()">
