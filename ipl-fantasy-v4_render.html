@@ -928,6 +928,45 @@
         playerStats = getStats(mid);
         allTeams = getTeams(mid);
         playerStatus = currentMatch.playerStatus || {};
+
+        if (session.isAdmin) adminAutoSyncPlayerIds();
+      }
+
+      async function adminAutoSyncPlayerIds() {
+        const mid = getActiveMid();
+        const m = getMatch(mid);
+        const players = getPlayers(mid);
+        if (!mid || !m || !players.length || m.finalized) return;
+        
+        // Only run if at least 5 players are missing IDs (means it's an old match)
+        const missingCount = players.filter(p => !p.id).length;
+        if (missingCount < 5 || window._syncingIds === mid) return;
+        
+        window._syncingIds = mid;
+        console.log(`[Sync] Backfilling player IDs for ${m.label}...`);
+        
+        try {
+          const cKey = (metaGame || {}).cricApiKey;
+          if (!cKey || !m.liveMatchId) return;
+          
+          const res = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${cKey}&id=${m.liveMatchId}`);
+          if (!res || res.status !== "success" || !res.data || !res.data.scorecard) return;
+          
+          const idMap = {};
+          res.data.scorecard.forEach(inning => {
+            (inning.batting || []).forEach(b => { if(b.batsman) idMap[b.batsman.name] = b.batsman.id; });
+            (inning.bowling || []).forEach(b => { if(b.bowler) idMap[b.bowler.name] = b.bowler.id; });
+          });
+          
+          const updatedPlayers = players.map(p => ({
+            ...p,
+            id: p.id || idMap[p.name] || null
+          }));
+          
+          await updateDoc(doc(db, "matches", mid), { players: updatedPlayers });
+          console.log(`[Sync] Successfully backfilled player IDs.`);
+        } catch (e) { console.warn("[Sync] ID backfill failed", e); }
+        finally { delete window._syncingIds; }
       }
 
       // Auto-refresh
@@ -8674,6 +8713,7 @@
             matchData.teamInfo.forEach((team) => {
               (team.players || []).forEach((p) => {
                 players.push({
+                  id: p.id,
                   name: p.name,
                   team: team.shortname || team.name,
                   role: mapRole(p.role),
@@ -8687,14 +8727,14 @@
             const squadRes = await _cricFetch(
               `https://api.cricapi.com/v1/match_squad?apikey=${key}&id=${mid}`,
             );
-            const squadData = await squadRes.json();
-            if (squadData.status === "success" && squadData.data) {
-              const teamsData = Array.isArray(squadData.data)
-                ? squadData.data
-                : [squadData.data];
+            if (squadRes.status === "success" && squadRes.data) {
+              const teamsData = Array.isArray(squadRes.data)
+                ? squadRes.data
+                : [squadRes.data];
               teamsData.forEach((team) => {
                 (team.players || []).forEach((p) => {
                   players.push({
+                    id: p.id,
                     name: p.name,
                     team: team.teamName || team.name || "Team",
                     role: mapRole(p.role),

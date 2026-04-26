@@ -1,12 +1,21 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.6.9"
+version: "3.7.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.6.9 — Project Intelligence
+# IPL Fantasy League v3.7.0 — Project Intelligence
+
+## 📸 Professional Player Profiles (v3.7.0 — April 26, 2026)
+
+**Goal**: Complete the professional look with real-time player imagery.
+
+### Feature 1 — Automated Player Thumbnails
+Player cards and team rows now feature official CricAPI thumbnails.
+- **Auto-Sync**: Implemented a background "Backfill" engine. When an admin views a match, the app detects missing player IDs and automatically fetches them from the scorecard to populate images.
+- **Robust Loading**: Upgraded `loadMatchPlayers` to capture unique IDs from the start, ensuring new matches have images immediately.
 
 ## 📺 Visual & Live Feed Enhancements (v3.6.9 — April 26, 2026)
 
