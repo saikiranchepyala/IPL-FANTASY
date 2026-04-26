@@ -938,57 +938,66 @@
         const players = getPlayers(mid);
         if (!mid || !m || !players.length || m.finalized) return;
         
-        // Lowered threshold: Sync if any player is missing an ID
         const missingCount = players.filter(p => !p.id).length;
-        if (missingCount === 0 || window._syncingIds === mid) return;
+        if (window._syncingIds === mid) return;
         
         window._syncingIds = mid;
-        console.log(`[Sync] Attempting to backfill ${missingCount} player IDs for ${m.label}...`);
+        toast("🔄 Syncing player photos...");
+        console.log(`[Sync] Attempting to backfill IDs for ${m.label}...`);
         
         try {
           const cKey = (metaGame || {}).cricApiKey;
-          if (!cKey || !m.liveMatchId) return;
-          
-          const res = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${cKey}&id=${m.liveMatchId}`);
-          if (!res || res.status !== "success" || !res.data || !res.data.scorecard) {
-             console.warn("[Sync] Scorecard not available for ID matching yet.");
-             return;
-          }
+          if (!cKey || !m.liveMatchId) throw new Error("API Key or Live ID missing");
           
           const idMap = {};
-          res.data.scorecard.forEach(inning => {
-            (inning.batting || []).forEach(b => { 
-              if(b.batsman) {
-                idMap[b.batsman.name.toLowerCase()] = b.batsman.id;
-                // Also map short versions
-                const parts = b.batsman.name.split(' ');
-                idMap[parts[parts.length-1].toLowerCase()] = b.batsman.id;
-              }
+          
+          // 1. Try Match Info first (Works for upcoming matches!)
+          const infoRes = await _cricFetch(`https://api.cricapi.com/v1/match_info?apikey=${cKey}&id=${m.liveMatchId}`);
+          if (infoRes.status === "success" && infoRes.data?.teamInfo) {
+            infoRes.data.teamInfo.forEach(t => {
+              (t.players || []).forEach(p => { idMap[p.name.toLowerCase()] = p.id; });
             });
-            (inning.bowling || []).forEach(b => { 
-              if(b.bowler) {
-                idMap[b.bowler.name.toLowerCase()] = b.bowler.id;
-                const parts = b.bowler.name.split(' ');
-                idMap[parts[parts.length-1].toLowerCase()] = b.bowler.id;
-              }
-            });
-          });
+          }
+
+          // 2. Fallback to Scorecard (If match has started/ended)
+          if (Object.keys(idMap).length < 5) {
+            const scRes = await _cricFetch(`https://api.cricapi.com/v1/match_scorecard?apikey=${cKey}&id=${m.liveMatchId}`);
+            if (scRes.status === "success" && scRes.data?.scorecard) {
+              scRes.data.scorecard.forEach(inning => {
+                (inning.batting || []).forEach(b => { if(b.batsman) idMap[b.batsman.name.toLowerCase()] = b.batsman.id; });
+                (inning.bowling || []).forEach(b => { if(b.bowler) idMap[b.bowler.name.toLowerCase()] = b.bowler.id; });
+              });
+            }
+          }
+
+          if (Object.keys(idMap).length === 0) {
+            throw new Error("No player data available in API for this match yet.");
+          }
           
           let foundAny = false;
           const updatedPlayers = players.map(p => {
             const name = p.name.toLowerCase();
             const lastName = name.split(' ').pop();
-            const newId = p.id || idMap[name] || idMap[lastName];
+            // Try full name match, then last name match
+            const newId = p.id || idMap[name] || Object.keys(idMap).find(k => k.endsWith(lastName) && lastName.length > 4);
             if (newId && !p.id) foundAny = true;
             return { ...p, id: newId || null };
           });
           
           if (foundAny) {
             await updateDoc(doc(db, "matches", mid), { players: updatedPlayers });
-            toast("✅ Player images synchronized!");
+            saveToPlayerCache(updatedPlayers);
+            toast("✅ Player images synchronized!", "ok");
+            refreshView();
+          } else {
+            toast("ℹ️ All available images already synced.", "info");
           }
-        } catch (e) { console.warn("[Sync] ID backfill failed", e); }
-        finally { delete window._syncingIds; }
+        } catch (e) { 
+          console.warn("[Sync] ID backfill failed:", e.message); 
+          toast("⚠️ Sync failed: " + e.message, "err");
+        } finally { 
+          delete window._syncingIds; 
+        }
       }
 
       // Auto-refresh
