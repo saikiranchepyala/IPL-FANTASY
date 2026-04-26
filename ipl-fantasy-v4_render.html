@@ -7844,7 +7844,7 @@
           // Step 1 — currentMatches (live + recent ~48hrs)
           const r1 = await _cricFetch(
             `https://api.cricapi.com/v1/currentMatches?apikey=${key}&offset=0`,
-          ).then((r) => r.json());
+          ).catch(() => null);
           if (r1.status !== "success")
             throw new Error(r1.reason || "API error — check your key");
           const current = r1.data || [];
@@ -7902,7 +7902,7 @@
             seriesIds.map((sid) =>
               _cricFetch(
                 `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${sid}`,
-              ).then((r) => r.json()),
+              ).catch(() => null),
             ),
           );
 
@@ -7993,7 +7993,7 @@
                 autoQueries.map((q) =>
                   _cricFetch(
                     `https://api.cricapi.com/v1/series?apikey=${key}&offset=0&search=${encodeURIComponent(q)}`,
-                  ).then((r) => r.json()),
+                  ).catch(() => null),
                 ),
               );
               const autoSids = new Set();
@@ -8128,7 +8128,7 @@
         try {
           const r = await _cricFetch(
             `https://api.cricapi.com/v1/series?apikey=${key}&offset=0&search=${encodeURIComponent(query)}`,
-          ).then((r) => r.json());
+          ).catch(() => null);
           if (r.status !== "success")
             throw new Error(r.reason || "Series search failed");
           const series = r.data || [];
@@ -8139,9 +8139,9 @@
             series
               .slice(0, 5)
               .map((s) =>
-                _cricFetch(
-                  `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${s.id}`,
-                ).then((r) => r.json()),
+              _cricFetch(
+                `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${s.id}`,
+              ).catch(() => null),
               ),
           );
 
@@ -8716,12 +8716,10 @@
           // 1. Direct fetch using Match ID (prevents lag from list endpoints)
           const url = `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`;
           const res = await _cricFetch(url);
-          const data = await res.json();
-
-          if (data.status === "failure") throw new Error(data.reason);
+          if (res.status === "failure") throw new Error(res.reason);
 
           let players = [];
-          const matchData = data.data;
+          const matchData = res.data;
 
           // Strategy: Try teamInfo (roles included) -> fallback to squad (names only)
           if (matchData.teamInfo && matchData.teamInfo.length > 0) {
@@ -8960,7 +8958,7 @@
         try {
           const scData = await _cricFetch(
             `https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`,
-          ).then((r) => r.json());
+          ).catch(() => null);
 
           if (scData.status !== "success") {
             // Scorecard endpoint failed — fall back to match_info for score/status/XI.
@@ -8968,7 +8966,7 @@
             console.warn("[Poller] Scorecard unavailable:", scData.reason, "— falling back to match_info");
             const infoFallback = await _cricFetch(
               `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
-            ).then((r) => r.json());
+            ).catch(() => null);
             if (infoFallback.status === "success") {
               const fbScore  = infoFallback.data?.score   || [];
               const fbStatus = infoFallback.data?.status  || "";
@@ -9235,7 +9233,7 @@
               try {
                 const retryData = await _cricFetch(
                   `https://api.cricapi.com/v1/match_scorecard?apikey=${key}&id=${mid}`,
-                ).then((r) => r.json());
+                ).catch(() => null);
                 if (retryData.status === "success" && (retryData.data?.scorecard || []).length > 0) {
                   // Got the final scorecard — splice it back in and continue processing
                   scData.data = retryData.data;
