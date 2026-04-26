@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.5.7
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.6.8
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -44,8 +44,8 @@ Step 3 — Fix the security rules
         }
         match /meta/{docId} {
           allow read: if true;
-          allow delete: if false;
-          allow create, update: if docId == 'members' || docId == 'game';
+          allow delete: if false; 
+          allow create, update: if docId == 'members' || docId == 'game' || docId == 'playerProfiles';
         }
         match /season/{docId} {
           allow read: if true;
@@ -57,6 +57,17 @@ Step 3 — Fix the security rules
 
   Click "Publish"
 
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RUNNING LOCALLY (ADVANCED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you want to run the app on your computer instead of Netlify, you MUST use a local server. Double-clicking the file (file:// protocol) will block all API calls.
+
+1. Open Terminal (Mac) or PowerShell (Windows)
+2. Navigate to your folder: cd path/to/folder
+3. Start server: python3 -m http.server 8000
+4. Open browser: http://localhost:8000/ipl-fantasy-v4_render.html
 Step 4 — Get your Firebase config
 
   Click the gear icon ⚙️ (top left, next to "Project Overview") → Project settings
@@ -303,3 +314,27 @@ Booster not saving
   → If your team is already locked in, the booster saves automatically
     on apply/remove. If team is not yet locked, booster is staged locally
     and saves when you click "Lock In My Team".
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHASE 4 — GIT MANAGEMENT (OPTIONAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 14 — Keep your repository in sync
+
+  If you make changes to your local file or update settings,
+  use these commands to push them to GitHub:
+
+  1.  Open your terminal/command prompt
+  2.  Navigate to your project folder:
+      cd path/to/IPL-FANTASY
+  3.  Add your changes:
+      git add .
+  4.  Commit your changes:
+      git commit -m "Update for Match 35"
+  5.  Push to GitHub:
+      git push
+
+  To get the latest updates from the main repo:
+  1.  git pull
+

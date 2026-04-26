@@ -247,10 +247,9 @@ This app uses a **paid CricketData.org API plan** for reliable scorecard access 
 - **Security** — Hardened Firestore rules are included to prevent unauthorized match/meta/season deletions. This is sufficient for a private friend group but not for a public application.
 - **Playoffs/finals** — boosters are disabled for playoff matches (Qualifiers, Eliminators, Final).
 - **Firestore free tier** — 50,000 reads / 20,000 writes per day — more than sufficient for a 25-member group across a full season.
-
 ---
 
-## 🛠️ Local Development
+## 🛠️ Local Development & Git Workflow
 
 No build step required. Open the file directly in a browser:
 
@@ -258,6 +257,32 @@ No build step required. Open the file directly in a browser:
 open ipl-fantasy-v4_render.html
 ```
 
+### Git Step-by-Step for Updates
+
+If you make changes or receive an update, follow these steps to keep your repository in sync:
+
+1.  **Check Status**: See which files have changed.
+    ```bash
+    git status
+    ```
+2.  **Stage Changes**: Add the modified files to the next commit.
+    ```bash
+    git add ipl-fantasy-v4_render.html
+    ```
+3.  **Commit**: Save your changes with a descriptive message.
+    ```bash
+    git commit -m "Brief description of what was changed"
+    ```
+4.  **Push**: Upload your changes to GitHub.
+    ```bash
+    git push
+    ```
+5.  **Pull**: If you are working from multiple machines, always pull the latest changes before starting.
+    ```bash
+    git pull
+    ```
+
+---
 Firebase will connect to your live Firestore instance, so any changes made locally affect real data.
 
 ---
