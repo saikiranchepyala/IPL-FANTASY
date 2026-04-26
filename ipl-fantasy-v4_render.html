@@ -1966,7 +1966,8 @@
       </div>
       <div class="match-title">${viewMatch.label || "–"}</div>
       ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
-      </div>  </div>
+    </div>
+  </div>
 
   ${
     xiReady && !locked
@@ -2629,7 +2630,6 @@
           );
         
         const userTeam = (liveMatch.teams || {})[session.name] || {};
-        const ticker = renderLiveTicker();
         const toggleBtn = `
           ${ticker}
           <div class="pv-toggle-row">
@@ -5077,7 +5077,8 @@
             </div>
             <div class="match-title">${viewMatch.label || "–"}</div>
             ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
-            </div>        </div>
+          </div>
+        </div>
         ${renderScoreBar(viewMatch)}
         ${
           otherActiveMatches.length
