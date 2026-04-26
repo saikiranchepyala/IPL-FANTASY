@@ -2236,7 +2236,7 @@
           const bstBadge = bstChipForPlayer(booster, p.name, pTeamKey, true);
           return `<div class="mtc-row ${p.isC ? "mtc-c" : p.isV ? "mtc-v" : ""}">
       <div class="mtc-role">${ri[p.role] || ""}</div>
-      <img src="https://h.cricapi.com/img/players/${p.id || 'default'}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+      <img src="https://h.cricapi.com/img/players/${p.id || PLAYER_CACHE[p.name] || 'default'}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
       <div class="mtc-info">
         <div class="mtc-name">
           ${badgeClass ? `<span class="badge-status ${badgeClass}">${badgeLabel}</span>` : ""}
@@ -4282,6 +4282,27 @@
         "Dilshan Madhushanka",
       ]);
 
+      // ── Global ID Cache — helps thumbnails show up for old matches ──
+      let PLAYER_CACHE = {};
+      try {
+        PLAYER_CACHE = JSON.parse(localStorage.getItem('ipl_player_cache') || '{}');
+      } catch(e) {}
+
+      function saveToPlayerCache(players) {
+        let changed = false;
+        (players || []).forEach(p => {
+          if (p.id && (!PLAYER_CACHE[p.name] || PLAYER_CACHE[p.name] !== p.id)) {
+            PLAYER_CACHE[p.name] = p.id;
+            changed = true;
+          }
+        });
+        if (changed) {
+          try {
+            localStorage.setItem('ipl_player_cache', JSON.stringify(PLAYER_CACHE));
+          } catch(e) {}
+        }
+      }
+
       // Normalize IPL team shortnames — CricAPI sometimes appends W (e.g. RCBW→RCB)
       const IPL_SHORT_MAP = {
         RCBW: "RCB",
@@ -4458,7 +4479,7 @@
       ${overBudget && !xiFull && !teamFull && !fgnFull ? '<div class="team-cap-badge" style="background:var(--muted)">💸</div>' : ""}
       <div class="pc-role">${ri[mappedRole] || ""} ${mappedRole}</div>
       <div class="pc-main">
-        <img src="https://h.cricapi.com/img/players/${p.id || 'default'}.jpg" class="pthumb" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+        <img src="https://h.cricapi.com/img/players/${p.id || PLAYER_CACHE[p.name] || 'default'}.jpg" class="pthumb" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
         <div class="pc-name">${escHtml(p.name)}</div>
       </div>
       ${isFgn && isIPLMatch() ? '<div class="pc-overseas-tag">FOREIGN</div>' : ""}
@@ -8772,6 +8793,7 @@
               return;
             }
             await updateDoc(doc(db, "matches", targetMid), { players });
+            saveToPlayerCache(players);
             toast(`Loaded ${players.length} players for match`);
           }
         } catch (e) {
