@@ -9,7 +9,7 @@ service cloud.firestore {
       allow update: if request.auth != null && (
         request.resource.data.diff(resource.data).affectedKeys().size() == 0
         || request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+            .hasOnly(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
                      'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
                      'currentBowler', 'matchResult', 'abandoned', 'finalized',
                      'tossResult', 'overSummaries', 'label', 'liveMatchId',

@@ -1178,12 +1178,8 @@
           // Init meta/game if needed
           const mgSnap = await getDoc(doc(db, "meta", "game"));
           if (!mgSnap.exists()) {
-            await setDoc(doc(db, "meta", "game"), {
-              currentMatchId: "",
-              activeMatchIds: [],
-              adminPin: "0000",
-              joinCode: "",
-            });
+            document.getElementById("app").innerHTML = `<div class="screen-center"><div class="cfg-err"><div style="font-size:48px">🛡️</div><h2>Database Not Configured</h2><p>Please create the <code>meta/game</code> document in your Firebase Firestore console to initialize the league.</p></div></div>`;
+            return;
           }
 
           window._snapErr = (e) => {

@@ -64,31 +64,35 @@ In Firestore → **Rules** tab, replace everything with these rules. All reads a
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
     match /matches/{matchId} {
-      allow read:   if request.auth != null;
-      allow delete: if false;
+      allow read: if request.auth != null;
+      allow delete: if false; 
       allow create: if request.auth != null;
       allow update: if request.auth != null && (
         request.resource.data.diff(resource.data).affectedKeys().size() == 0
         || request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
+            .hasOnly(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
                      'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
                      'currentBowler', 'matchResult', 'abandoned', 'finalized',
                      'tossResult', 'overSummaries', 'label', 'liveMatchId',
                      't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                     'matchNum', 'fantasyEnabled', 'createdAt'])
+                     'matchNum', 'fantasyEnabled', 'createdAt', 'venue'])
       );
     }
+
     match /meta/{docId} {
       allow read:           if request.auth != null;
       allow delete:         if false;
-      allow create, update: if request.auth != null && (docId == 'members' || docId == 'game');
+      allow create, update: if request.auth != null && (docId == 'members' || docId == 'game' || docId == 'playerProfiles');
     }
+
     match /season/{docId} {
       allow read:           if request.auth != null;
       allow delete:         if false;
       allow create, update: if request.auth != null && docId == 'totals';
     }
+
   }
 }
 ```
