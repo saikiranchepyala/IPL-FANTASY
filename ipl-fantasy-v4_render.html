@@ -1673,6 +1673,31 @@
         return [...document.querySelectorAll(sel)].map((d) => d.value).join("");
       }
 
+      // ── PIN Hashing (SHA-256 + salt) ──
+      // Uses the member's name as salt so identical PINs produce different hashes.
+      async function hashPin(pin, salt) {
+        const raw = `${salt.toLowerCase().trim()}:${pin}`;
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+      }
+      // Legacy check: if stored value is a 4-digit plaintext PIN (not a 64-char hex hash)
+      function isLegacyPin(stored) {
+        return typeof stored === "string" && stored.length === 4 && /^\d{4}$/.test(stored);
+      }
+      // Compare entered PIN against stored value (hashed or legacy plaintext).
+      // If legacy match succeeds, auto-upgrades the stored PIN to its hash.
+      async function verifyPin(enteredPin, storedPin, salt, upgradeCallback) {
+        const hashed = await hashPin(enteredPin, salt);
+        if (storedPin === hashed) return true;
+        // Legacy fallback: stored value is still a 4-digit plaintext PIN
+        if (isLegacyPin(storedPin) && storedPin === enteredPin) {
+          // Auto-upgrade to hash in background
+          if (upgradeCallback) upgradeCallback(hashed).catch(e => console.warn("PIN upgrade failed:", e));
+          return true;
+        }
+        return false;
+      }
+
       // Member login directly from main login screen
       async function doMemberLogin() {
         const name = (
@@ -1694,7 +1719,10 @@
           err.textContent = "Name not found — use your join link to register";
           return;
         }
-        if (members[name].pin !== pin) {
+        const _ok1 = await verifyPin(pin, members[name].pin, name, async (h) => {
+          await updateDoc(doc(db, "meta", "members"), { [`${name}.pin`]: h });
+        });
+        if (!_ok1) {
           err.textContent = "Wrong PIN";
           return;
         }
@@ -1733,7 +1761,10 @@
             err.textContent = "Name not found — use your join link";
             return;
           }
-          if (members[name].pin !== pin) {
+          const _ok2 = await verifyPin(pin, members[name].pin, name, async (h) => {
+            await updateDoc(doc(db, "meta", "members"), { [`${name}.pin`]: h });
+          });
+          if (!_ok2) {
             err.textContent = "Wrong PIN";
             return;
           }
@@ -1759,7 +1790,10 @@
           err = document.getElementById("adminErr");
         const snap = await getDoc(doc(db, "meta", "game"));
         const gd = snap.data() || {};
-        if (pin === (gd.adminPin || "0000")) {
+        const _okAdmin = await verifyPin(pin, gd.adminPin || "0000", "__admin__", async (h) => {
+          await updateDoc(doc(db, "meta", "game"), { adminPin: h });
+        });
+        if (_okAdmin) {
           session = { name: null, isAdmin: true };
           sessionStorage.setItem("_adminOk", "1"); // marks PIN verified this browser session
           sessionSave();
@@ -1804,13 +1838,18 @@
           err.textContent = `Name already taken as "${_collision}" — choose a different name`;
           return;
         }
-        if (members[name] && members[name].pin !== pin) {
-          err.textContent =
-            "Name taken — use a different name or your correct PIN";
-          return;
+        if (members[name]) {
+          // Existing member re-joining — verify their PIN
+          const _okJoin = await verifyPin(pin, members[name].pin, name);
+          if (!_okJoin) {
+            err.textContent =
+              "Name taken — use a different name or your correct PIN";
+            return;
+          }
         }
+        const hashedJoinPin = await hashPin(pin, name);
         members[name] = {
-          pin,
+          pin: hashedJoinPin,
           teamName: teamName || name + "'s Team",
           joinedAt: Date.now(),
           boosters: members[name]?.boosters || { ...BST_DEFAULTS },
@@ -8477,7 +8516,8 @@
           return;
         }
         try {
-          await updateDoc(doc(db, "meta", "game"), { adminPin: _pin });
+          const _hashedAdmin = await hashPin(_pin, "__admin__");
+          await updateDoc(doc(db, "meta", "game"), { adminPin: _hashedAdmin });
           toast("Saved ✓");
         } catch (e) {
           toast("Save failed: " + e.message, "err");

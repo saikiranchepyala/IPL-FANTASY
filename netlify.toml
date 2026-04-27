@@ -6,3 +6,4 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
     X-XSS-Protection = "1; mode=block"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://api.cricapi.com https://corsproxy.io; img-src 'self' data: https://h.cricapi.com https://scores.iplt20.com https://*.gstatic.com https://*.googleusercontent.com; frame-src 'none'; object-src 'none'; base-uri 'self'"
