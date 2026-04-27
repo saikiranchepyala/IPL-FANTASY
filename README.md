@@ -441,4 +441,4 @@ This is a personal project for a private friend group. Feel free to fork it and 
 
 ## 📄 License
 
-MIT — do whatever you want with it.
+This project is licensed under the [MIT License](https://opensource.org/licenses/MIT). You are free to use, modify, and distribute this software as per the terms of the license.
