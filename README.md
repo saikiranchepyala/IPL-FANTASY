@@ -4,7 +4,14 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.7.8** — [Changelog](#-changelog)
+**Current version: v3.7.9** — [Changelog](#-changelog)
+
+## 🛡️ Security & Known Limitations
+
+Because this is a **"No-Backend" Serverless SPA**, the browser handles all logic (points calculations, API fetching).
+- **Firestore Trust Boundary**: The `firestore.rules` rely on `request.auth != null` via Firebase Anonymous Auth. This means anyone who visits your Netlify URL gets a valid token. 
+- **API Key Visibility**: The CricketData API key is stored in the `/meta/game` document, which is globally readable by any authenticated visitor. Do not share your league URL on public forums or social media if you are concerned about your 2000-call daily quota being scraped.
+- **Admin Actions**: Because Anonymous Auth does not natively map roles, administrative updates to match documents are structurally permitted by Firestore rules for any visitor. The app relies on client-side UI gating. This app is designed strictly for **trusted, private friend groups**.
 
 ---
 
@@ -317,7 +324,12 @@ Firebase will connect to your live Firestore instance, so any changes made local
 
 ## 📋 Changelog
 
-### v3.7.6 — April 26, 2026
+### v3.7.9 — April 26, 2026
+**Data Integrity & Security**
+- **Booster Data-Loss Race Condition Fixed**: Updated the `setDoc` calls in team submission, join, and profile-save functions to use targeted `{ merge: true }` on specific user keys (e.g., `{[session.name]: { boosters: inv2 }}`). This definitively prevents concurrent team submissions from overwriting and deleting other members' accounts or booster states.
+- **Known Limitations Added**: Acknowledged the architectural tradeoff of storing the CricAPI key in a publicly-readable Firestore document for this serverless SPA model.
+
+### v3.7.8 — April 26, 2026
 **Security & Firestore Hardening**
 - **0000 Auto-Creation Removed**: Stopped client-side creation of `meta/game` document to close the default Admin PIN race condition. First-time setup must now be done manually in the Firebase Console.
 - **Strict Data Validation**: Hardened Firestore rules. `matches` document updates now use `.hasOnly()` instead of `.hasAny()`, preventing malicious injection of arbitrary fields into match objects.

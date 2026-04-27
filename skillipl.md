@@ -1,14 +1,23 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.6"
+version: "3.7.9"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.6 — Project Intelligence
+# IPL Fantasy League v3.7.9 — Project Intelligence
 
-## 🛡️ Security & Firestore Hardening (v3.7.6 — April 26, 2026)
+## 🛡️ Data Integrity Patch (v3.7.9 — April 26, 2026)
+
+**Goal**: Close the data-loss race condition on `meta/members` during concurrent team submissions.
+
+### Fix 1 — targeted dot-notation merging on `setDoc`
+Updated `setDoc` calls in `lockTeamBtn`, `doJoin`, and `adminSaveProfile` to map to the specific `session.name` key using `{ [session.name]: newData }` along with `{ merge: true }`. Previously, it was spreading the entire `allMembers` object, creating a classic read-modify-write race condition where simultaneous users would silently overwrite each other's account data and boosters.
+
+---
+
+## 🛡️ Security & Firestore Hardening (v3.7.8 — April 26, 2026)
 
 **Goal**: Close the 0000 admin race condition and tighten Firestore `update` validation.
 

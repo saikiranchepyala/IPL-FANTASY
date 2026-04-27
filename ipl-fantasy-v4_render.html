@@ -1844,15 +1844,15 @@
           }
         }
         const hashedJoinPin = await hashPin(pin, name);
-        members[name] = {
+        const newMemberData = {
           pin: hashedJoinPin,
           teamName: teamName || name + "'s Team",
           joinedAt: Date.now(),
           boosters: members[name]?.boosters || { ...BST_DEFAULTS },
         };
-        await setDoc(doc(db, "meta", "members"), members, { merge: true });
-        allMembers = members;
-        session = { name, isAdmin: false };
+        await setDoc(doc(db, "meta", "members"), { [name]: newMemberData }, { merge: true });
+        members[name] = newMemberData;
+        allMembers = members;        session = { name, isAdmin: false };
         localTeam = { players: [], captain: "", vc: "" };
         memberSelectedMatchId = currentMatchId;
         sessionSave();
@@ -5020,9 +5020,11 @@
                   0,
                   (inv2[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
                 );
+              await setDoc(doc(db, "meta", "members"), {
+                [session.name]: { boosters: inv2 }
+              }, { merge: true });
               if (!mems2[session.name]) mems2[session.name] = {};
               mems2[session.name].boosters = inv2;
-              await setDoc(doc(db, "meta", "members"), mems2, { merge: true });
               allMembers = mems2;
             }
             allTeams[session.name] = { ...localTeam, submitted: true };
@@ -8563,14 +8565,15 @@
         if (_apNameErr) { toast(_apNameErr, "err"); return; }
         const mSnap = await getDoc(doc(db, "meta", "members"));
         const members = mSnap.data() || {};
-        members[name] = {
+        const newAdminProfile = {
           pin: "__admin__",
           teamName: teamName || name + "'s XI",
           joinedAt: Date.now(),
           isAdmin: true,
           boosters: members[name]?.boosters || { ...BST_DEFAULTS },
         };
-        await setDoc(doc(db, "meta", "members"), members, { merge: true });
+        await setDoc(doc(db, "meta", "members"), { [name]: newAdminProfile }, { merge: true });
+        members[name] = newAdminProfile;
         await updateDoc(doc(db, "meta", "game"), {
           adminProfile: { name, teamName: teamName || name + "'s XI" },
         });
