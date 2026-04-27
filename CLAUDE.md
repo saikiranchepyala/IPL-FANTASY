@@ -16,7 +16,13 @@ open ipl-fantasy-v4_render.html
 npx eslint ipl-fantasy-v4_render.html
 ```
 
-There are no tests, no build step, and no dev server. The app loads Firebase SDK from CDN via ES module imports. Local runs hit the live Firestore instance — changes affect real data.
+No build step or dev server. The app loads Firebase SDK from CDN via ES module imports. Local runs hit the live Firestore instance — changes affect real data.
+
+```bash
+# Run tests (102 assertions: schema, points calc, sync logic, CSS audit)
+node mock-server.js &
+node test-suite.js        # writes test-results.log
+```
 
 ## Architecture of the Single HTML File
 
@@ -37,10 +43,11 @@ The JS is organized into logical sections separated by comment banners:
 - **Booster System** (~line 344): Triple(3×), Double(2×), Team(2×) booster logic with Firestore persistence
 - **Player Career Stats** (~line 473): Lazy-load from CricAPI with two-tier cache (in-memory + Firestore `/meta/playerProfiles`)
 - **State Management** (~line 894): Module-scope variables (`_members`, `_match`, `_stats`, `_role`, `_mid`, etc.) — no framework, just plain globals
-- **`_cricFetch()`** (~line 1063): Central API wrapper with CORS proxy fallback
+- **`_cricFetch()`** (~line 1063): Central API wrapper with AbortController timeout (15s)
 - **`boot()`** (~line 1176): Entry point — anonymous auth → load game state → route to login/member/admin view
 - **Router** (~line 1386): URL param-based tab navigation (`?tab=`, `?atab=` for admin)
-- **Login/Join UI** (~line 1515): `doLogin()`, `doJoin()` with name validation (blocks Firestore-unsafe chars like `.[]#$/`)
+- **PIN Hashing** (~line 1676): `hashPin()` (PBKDF2-SHA256, 600k iterations), `verifyPin()` with legacy plaintext auto-upgrade (deadline: 2026-05-15)
+- **Login/Join UI** (~line 1515): `doLogin()`, `doJoin()` with shared `validateName()` (blocks Firestore-unsafe chars `.[]#$/`)
 - **Member Tabs** (~line 1954): My Team, Live Scores, Season Table, Match History, Match Info (conditional)
 - **Admin Tabs** (~line 5008): Current Match management, Player Stats, admin controls
 - **`autoFetchStats()`** (~line 9002): The live scoring engine — polls CricAPI every ~5 min, parses scorecard, updates stats in Firestore
@@ -74,6 +81,8 @@ The JS is organized into logical sections separated by comment banners:
 - Deletes are blocked (`allow delete: if false`) on all collections
 - Match updates are field-whitelisted via `affectedKeys().hasAny([...])`
 - Meta writes restricted to known doc IDs (`members`, `game`, `playerProfiles`)
+
+**Known limitation**: Anonymous auth means any visitor who loads the page satisfies `request.auth != null`. Write authorization is effectively open — there is no server-side enforcement of admin-only operations. PIN hashing protects against passive DB reads but not against direct Firestore writes. Proper fix requires Firebase custom claims + role-checked rules via a Cloud Function.
 
 ## Deployment
 

@@ -1063,13 +1063,12 @@
       async function _cricFetch(url, opts = {}) {
         if (!_trackApiCall())
           throw new Error("CricAPI daily quota exhausted (2000 calls)");
-        
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
-        
+
         try {
-          // Attempt 1: Direct Fetch
-          console.log(`[Fetch] Attempting direct: ${url.split('apikey=')[0]}...`);
+          console.log(`[Fetch] ${url.split('apikey=')[0]}...`);
           const res = await fetch(url, {
             ...opts,
             headers: { 'Accept': 'application/json', ...opts.headers },
@@ -1080,26 +1079,8 @@
           return await res.json();
         } catch (e) {
           clearTimeout(timeout);
-          console.warn(`[Fetch] Primary failed: ${e.message}. Trying CORS Proxy...`);
-          
-          // Attempt 2: CORS Proxy Fallback
-          try {
-            // SECURITY: Strip apikey from URL before sending to third-party proxy
-            const safeUrl = url.split('apikey=')[0] + 'apikey=HIDDEN';
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`; 
-            
-            // Actually, we can't send a HIDDEN key to the proxy, it will fail.
-            // Better strategy: Only use proxy if the user EXPLICITLY enables it, 
-            // but for now, let's at least warn that this is a security risk.
-            console.warn(`[Fetch] Falling back to proxy. Note: This sends your API key to corsproxy.io`);
-            
-            const pRes = await fetch(proxyUrl);
-            if (!pRes.ok) throw new Error(`Proxy HTTP ${pRes.status}`);
-            return await pRes.json();
-          } catch (proxyErr) {
-            console.error(`[Fetch] Proxy also failed: ${proxyErr.message}`);
-            throw new Error(`Connection Failed. Your network is blocking CricAPI. Try using a mobile hotspot.`);
-          }
+          console.error(`[Fetch] Failed: ${e.message}`);
+          throw new Error("Connection failed. Check your network or try a mobile hotspot.");
         }
       }
       let playerStatus = {}; // { playerName: 'playing'|'notplaying'|'impact' }
@@ -1669,21 +1650,42 @@
           });
         });
       }
+      // ── Shared name validation ──
+      // Firestore dot-path notation treats . as a field separator, so names like
+      // "J.Smith" corrupt nested writes. Block all Firestore-unsafe characters.
+      const _NAME_BAD_CHARS = /[.\[\]#$/]/;
+      function validateName(name) {
+        if (!name) return "Enter your name";
+        if (_NAME_BAD_CHARS.test(name)) return "Name cannot contain . [ ] # $ / — choose a different name";
+        return null; // valid
+      }
+
       function pinVal(sel) {
         return [...document.querySelectorAll(sel)].map((d) => d.value).join("");
       }
 
-      // ── PIN Hashing (SHA-256 + salt) ──
+      // ── PIN Hashing (PBKDF2-SHA256, 600k iterations) ──
       // Uses the member's name as salt so identical PINs produce different hashes.
+      // PBKDF2 with 600k iterations makes brute-forcing the 10k PIN space take
+      // minutes instead of microseconds (vs. a single SHA-256 round).
       async function hashPin(pin, salt) {
-        const raw = `${salt.toLowerCase().trim()}:${pin}`;
-        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
-        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+        const enc = new TextEncoder();
+        const baseKey = await crypto.subtle.importKey(
+          "raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]
+        );
+        const bits = await crypto.subtle.deriveBits(
+          { name: "PBKDF2", hash: "SHA-256", salt: enc.encode(salt.toLowerCase().trim()), iterations: 600000 },
+          baseKey, 256
+        );
+        return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, "0")).join("");
       }
-      // Legacy check: if stored value is a 4-digit plaintext PIN (not a 64-char hex hash)
+      // Legacy check: stored value is a 4-digit plaintext PIN (not a 64-char hex hash)
       function isLegacyPin(stored) {
         return typeof stored === "string" && stored.length === 4 && /^\d{4}$/.test(stored);
       }
+      // Legacy cutoff: plaintext PINs accepted only until this date, then refused.
+      // Gives existing members time to log in and auto-upgrade their PINs.
+      const _PIN_LEGACY_DEADLINE = new Date("2026-05-15T00:00:00Z").getTime();
       // Compare entered PIN against stored value (hashed or legacy plaintext).
       // If legacy match succeeds, auto-upgrades the stored PIN to its hash.
       async function verifyPin(enteredPin, storedPin, salt, upgradeCallback) {
@@ -1691,7 +1693,11 @@
         if (storedPin === hashed) return true;
         // Legacy fallback: stored value is still a 4-digit plaintext PIN
         if (isLegacyPin(storedPin) && storedPin === enteredPin) {
-          // Auto-upgrade to hash in background
+          if (Date.now() > _PIN_LEGACY_DEADLINE) {
+            console.warn("[Auth] Legacy plaintext PIN rejected — migration deadline passed");
+            return false;
+          }
+          console.warn("[Auth] Legacy plaintext PIN accepted — auto-upgrading to PBKDF2 hash");
           if (upgradeCallback) upgradeCallback(hashed).catch(e => console.warn("PIN upgrade failed:", e));
           return true;
         }
@@ -1809,14 +1815,8 @@
         const pin = pinVal(".pj"),
           code = (urlJoinCode || "").toUpperCase(),
           err = document.getElementById("joinErr");
-        if (!name) {
-          err.textContent = "Enter your name";
-          return;
-        }
-        if (/[.\[\]#$/]/.test(name)) {
-          err.textContent = "Name cannot contain . [ ] # $ / — choose a different name";
-          return;
-        }
+        const _nameErr = validateName(name);
+        if (_nameErr) { err.textContent = _nameErr; return; }
         if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
           err.textContent = "Choose a 4-digit PIN";
           return;
@@ -8563,10 +8563,8 @@
         const teamName = (
           document.getElementById("adminTeamName")?.value || ""
         ).trim();
-        if (!name) {
-          toast("Enter your player name", "err");
-          return;
-        }
+        const _apNameErr = validateName(name);
+        if (_apNameErr) { toast(_apNameErr, "err"); return; }
         const mSnap = await getDoc(doc(db, "meta", "members"));
         const members = mSnap.data() || {};
         members[name] = {
