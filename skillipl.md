@@ -1,12 +1,24 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.5"
+version: "3.7.6"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.5 — Project Intelligence
+# IPL Fantasy League v3.7.6 — Project Intelligence
+
+## 🛡️ Security & Firestore Hardening (v3.7.6 — April 26, 2026)
+
+**Goal**: Close the 0000 admin race condition and tighten Firestore `update` validation.
+
+### Fix 1 — Removed "0000" Auto-Creation
+Deleted the code in `boot()` that automatically created the `meta/game` document with the default PIN `0000`. First-time setup must now be done manually in the Firebase Console to prevent a race condition where the first visitor claims the Admin role.
+
+### Fix 2 — Strict Data Validation (`.hasOnly()`)
+Hardened Firestore rules. `matches` document updates now use `.hasOnly()` instead of `.hasAny()`, preventing malicious injection of arbitrary fields into match objects.
+
+---
 
 ## 🛡️ Security Review Fixes (v3.7.5 — April 26, 2026)
 
