@@ -1,12 +1,33 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.4"
+version: "3.7.5"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.4 — Project Intelligence
+# IPL Fantasy League v3.7.5 — Project Intelligence
+
+## 🛡️ Security Review Fixes (v3.7.5 — April 26, 2026)
+
+**Goal**: Address all actionable findings from the v3.7.2→v3.7.4 security re-review.
+
+### Fix 1 — PBKDF2 PIN Hashing (600k iterations)
+Replaced single-round SHA-256 with `crypto.subtle.deriveBits` using PBKDF2-SHA256 and 600k iterations. The 10,000-candidate PIN space now takes minutes to brute-force instead of microseconds.
+
+### Fix 2 — Legacy PIN Sunset Deadline
+Added `_PIN_LEGACY_DEADLINE` (2026-05-15). After this date, plaintext PINs stored in Firestore are refused — closing the downgrade attack where an attacker could overwrite a hash with a known plaintext.
+
+### Fix 3 — Removed corsproxy.io Fallback
+Deleted the entire CORS proxy fallback from `_cricFetch`. The previous implementation leaked the CricAPI key to a third-party proxy, had dead code (`safeUrl` computed but never used), and stream-of-consciousness comments. Also removed `corsproxy.io` from the CSP `connect-src` directive.
+
+### Fix 4 — Shared Name Validation
+Extracted `validateName()` with `_NAME_BAD_CHARS` regex and applied it to both `doJoin` and `adminSaveProfile`. Previously `adminSaveProfile` had no dot-path character validation — an admin name like "Foo.Bar" would corrupt Firestore writes.
+
+### Fix 5 — CLAUDE.md Accuracy
+Updated to reflect: test suite exists (102 tests), PBKDF2 hashing, and an honest caveat that anonymous auth does not enforce admin-only write authorization.
+
+---
 
 ## 🔐 PIN Hashing & Content Security Policy (v3.7.4 — April 26, 2026)
 
