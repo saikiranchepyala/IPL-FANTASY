@@ -9617,8 +9617,8 @@
           if (ended) statsUpdate["matchEnded"] = true; // persist ended flag via main scorecard path
 
           // Extract current active players from scorecard (Live Batsmen & Bowler)
-          // Skip for ended matches — currentBatsmen/currentBowler were already cleared in the match-end update
-          if (sc.length > 0 && !ended) {
+          // Always run this even if ended so the final batsmen/bowler are correct
+          if (sc.length > 0) {
             // Pick the ACTIVE innings — not blindly sc[last]. 
             // CricAPI doesn't guarantee innings order. Strategy:
             // 1. Match against the API's score array (which is correctly ordered)
@@ -9627,7 +9627,12 @@
             let curInn = sc[sc.length - 1]; // default fallback
             if (sc.length > 1) {
               const activeName = scoreArr.length ? scoreArr[scoreArr.length - 1].inning : null;
-              const matchInn = sc.find(inn => activeName && (inn.inning || inn.name) === activeName);
+              const matchInn = sc.find(inn => {
+                if (!activeName) return false;
+                const n1 = String(inn.inning || inn.name || "").toLowerCase().trim();
+                const n2 = String(activeName).toLowerCase().trim();
+                return n1 === n2 || n1.includes(n2) || n2.includes(n1);
+              });
               const hasStriker = sc.find(inn => (inn.batting || []).some(b => b.strike === 1 || b.strike === "1" || b.strike === true || String(b.batsman?.name || b.name || "").includes("*")));
               
               if (matchInn) {
