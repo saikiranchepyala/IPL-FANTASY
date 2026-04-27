@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.7.2** — [Changelog](#-changelog)
+**Current version: v3.7.4** — [Changelog](#-changelog)
 
 ---
 
@@ -312,6 +312,11 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.7.4 — April 26, 2026
+**PIN Hashing & Content Security Policy**
+- **PIN Hashing**: All member and admin PINs are now hashed with SHA-256 (salted with the member's name) before storage in Firestore. Legacy plaintext PINs auto-upgrade on first login.
+- **Content Security Policy**: Added a full CSP header to `netlify.toml` restricting scripts, styles, images, and connections to trusted origins only.
 
 ### v3.7.2 — April 26, 2026
 **Security & Stability**

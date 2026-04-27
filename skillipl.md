@@ -1,12 +1,33 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.2"
+version: "3.7.4"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.2 — Project Intelligence
+# IPL Fantasy League v3.7.4 — Project Intelligence
+
+## 🔐 PIN Hashing & Content Security Policy (v3.7.4 — April 26, 2026)
+
+**Goal**: Protect member PINs at rest and restrict browser resource loading to trusted origins.
+
+### Feature 1 — PIN Hashing (SHA-256 + Salt)
+Implemented `hashPin(pin, salt)` using the browser's native `crypto.subtle.digest("SHA-256", ...)` API. The member's lowercased name is used as the salt, ensuring identical PINs produce unique hashes in Firestore.
+
+- **`verifyPin()`**: Compares entered PIN against stored value (hashed or legacy plaintext).
+- **Auto-Upgrade**: On successful legacy login, the plaintext PIN is silently replaced with its SHA-256 hash in Firestore.
+- **Functions Updated**: `doMemberLogin`, `bindReturn`, `doAdminLogin`, `doJoin`, `adminSaveLeague`.
+- **Admin Salt**: Admin PIN uses the fixed salt `"__admin__"` since it's not tied to a member name.
+
+### Feature 2 — Content Security Policy (CSP)
+Added a `Content-Security-Policy` header to `netlify.toml`:
+- **script-src**: `'self'`, `'unsafe-inline'` (required for `<script type="module">` and Static DNA onclick handlers), `www.gstatic.com` (Firebase SDK), `cdn.jsdelivr.net` (confetti).
+- **connect-src**: Firebase (`*.googleapis.com`, `*.firebaseio.com`, `*.firebaseapp.com`), `api.cricapi.com`, `corsproxy.io`.
+- **img-src**: `data:` (SVG fallbacks), `h.cricapi.com` (player photos), `scores.iplt20.com` (team logos), Google CDNs.
+- **frame-src / object-src**: `'none'` — blocks iframing and plugin embeds.
+
+---
 
 ## 🛡️ Security & Stability Patch (v3.7.2 — April 26, 2026)
 
