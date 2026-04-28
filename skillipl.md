@@ -1,12 +1,27 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.7.9"
+version: "3.8.0"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.7.9 — Project Intelligence
+# IPL Fantasy League v3.8.0 — Project Intelligence
+
+## ⚡ CricAPI Credit Optimization (v3.8.0 — April 28, 2026)
+
+**Goal**: Eliminate unnecessary CricAPI credit burn caused by snapshot-triggered API cascades, idle member polling, and aggressive default AR interval.
+
+### Fix 1 — Remove `adminAutoSyncPlayerIds` from `syncDerivedState`
+`syncDerivedState()` is called on every Firestore `onSnapshot` callback (meta/game changes, match doc changes). It was unconditionally calling `adminAutoSyncPlayerIds()` for admin sessions, which makes 1-2 `_cricFetch` calls (`match_info` + `match_scorecard`). With 3 active matches, each AR tick triggered a write → snapshot → sync cascade producing 6 extra API calls per tick. Removed the auto-call; photo sync remains available as a manual admin button.
+
+### Fix 2 — Gate global ticker to admin-only with active matches
+`fetchGlobalTicker()` was started unconditionally in `boot()` for every user, polling `currentMatches` every 5 minutes. With 8 members leaving tabs open, that's 768 credits/day just from the ticker. Added `_startTickerIfNeeded()` which only starts the ticker when: (a) session is admin, and (b) there are active matches. Called from `_doRefresh()` so it auto-starts after admin login.
+
+### Fix 3 — Raise AR default from 30s to 60s
+Changed `window.arStoredSecs` default and both fallback values in `adminStartMatch`/`adminToggleAR` from `"30"` to `"60"`. Fantasy point updates don't need 30s granularity — wickets and boundaries are infrequent enough that 60s is sufficient. Saves ~210 credits per 3.5-hour match. Admin can still manually select 30s from the dropdown.
+
+---
 
 ## 🛡️ Data Integrity Patch (v3.7.9 — April 26, 2026)
 

@@ -943,8 +943,6 @@
         playerStats = getStats(mid);
         allTeams = getTeams(mid);
         playerStatus = currentMatch.playerStatus || {};
-
-        if (session.isAdmin) adminAutoSyncPlayerIds();
       }
 
       window.adminAutoSyncPlayerIds = async function () {
@@ -1036,7 +1034,7 @@
       let arIntervalTimer = null,
         arTimer = null,
         arSecs = 0;
-      window.arStoredSecs = 30;
+      window.arStoredSecs = 60;
       // CricAPI quota tracker (resets daily; persisted in localStorage to survive reloads)
       let _cricApiCalls = 0; 
       function _trackApiCall() {
@@ -1169,10 +1167,9 @@
           
           showScreen("loading");
           
-          // Start Global Ticker (low-cost summary feed)
-          fetchGlobalTicker();
-          if (_tickerInterval) clearInterval(_tickerInterval);
-          _tickerInterval = setInterval(fetchGlobalTicker, 300000); // 5 min interval
+          // Start Global Ticker (low-cost summary feed) — deferred until session is known.
+          // Ticker is started in _startTickerIfNeeded() after login, only for admin users
+          // with active matches, to avoid burning CricAPI credits from idle member tabs.
 
 
           // Init meta/game if needed
@@ -1402,6 +1399,7 @@
       }
       function _doRefresh() {
         _refreshTimer = null;
+        _startTickerIfNeeded();
         const sy = window.scrollY;
         // Refresh score pill — wrapper always exists in nav so we update innerHTML, not outerHTML
         const _spWrap = document.getElementById("scorePillWrap");
@@ -8415,7 +8413,7 @@
         toast("Match started! 🚀 Teams locked and leaderboard live.");
         if (!arIntervalTimer) {
           const secs = parseInt(
-            document.getElementById("arInterval")?.value || "30",
+            document.getElementById("arInterval")?.value || "60",
           );
           if (secs > 0) {
             startAR(secs);
@@ -8484,7 +8482,7 @@
           toast("Auto-refresh stopped");
         } else {
           const secs = parseInt(
-            document.getElementById("arInterval")?.value || "30",
+            document.getElementById("arInterval")?.value || "60",
           );
           if (!secs) {
             toast("Select interval", "err");
@@ -10097,6 +10095,18 @@
       }
       // ── Sticky Score Pill ──
       let globalTickerData = [];
+
+      // Only start the ticker for admin sessions with active matches — avoids
+      // burning CricAPI credits from idle member tabs (each tab was polling
+      // currentMatches every 5 min regardless of role).
+      function _startTickerIfNeeded() {
+        if (_tickerInterval) return; // already running
+        if (!session.isAdmin) return; // members don't need it
+        if (!(metaGame.activeMatchIds || []).length && !metaGame.currentMatchId) return; // no matches
+        fetchGlobalTicker();
+        _tickerInterval = setInterval(fetchGlobalTicker, 300000); // 5 min
+      }
+
       async function fetchGlobalTicker() {
         try {
           const cKey = (metaGame || {}).cricApiKey;

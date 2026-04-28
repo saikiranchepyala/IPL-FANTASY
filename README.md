@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.7.9** — [Changelog](#-changelog)
+**Current version: v3.8.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,12 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.8.0 — April 28, 2026
+**CricAPI Credit Optimization**
+- **Removed auto-sync from snapshot loop**: `adminAutoSyncPlayerIds` was firing on every Firestore `onSnapshot` callback, causing 2-6 extra API calls per auto-refresh tick. Photo sync is now manual-only (admin button), eliminating the cascade where AR write → snapshot → sync → API calls multiplied credits per tick.
+- **Global ticker gated to admin sessions**: `fetchGlobalTicker` (calls `currentMatches` every 5 min) was running for all users including idle member tabs. Now only starts for admin sessions with active matches, saving ~96 credits/user/day.
+- **AR default interval raised from 30s to 60s**: Fantasy point granularity doesn't need 30-second polling. Halves AR credit usage per match (~210 credits saved). Admin can still select 30s from the dropdown.
 
 ### v3.7.9 — April 26, 2026
 **Data Integrity & Security**
