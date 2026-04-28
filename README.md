@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.8.1** — [Changelog](#-changelog)
+**Current version: v3.8.2** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,14 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.8.2 — April 28, 2026
+**Robustness & Bug Fixes**
+- **Lost Booster Bug Fixed**: Resolved an issue where returning members re-authenticating via the Join Link (`?join=CODE`) had their local team state wiped, leading to their boosters being silently refunded upon saving.
+- **Automated Role Correction**: Added a `ROLE_OVERRIDES` dictionary inside the CricAPI squad-fetching logic to correctly assign "BOWL" to uncapped players like Brijesh Sharma and Yash Raj Punja.
+- **Booster Race Condition**: Rewrote standalone `applyBoosterChoice` and `removeBooster` menus to use atomic `writeBatch` transactions.
+- **fetchGlobalTicker ReferenceError**: Fixed `activeTab is not defined` crash in the background ticker by parsing `window.location.search` instead.
+- **Test Suite Expansion**: Added 9 new tests to `test-suite.js` to simulate the "Allrounder" misclassification and verify the new role override logic.
 
 ### v3.8.1 — April 28, 2026
 **Security Hardening & Bug Fixes**
