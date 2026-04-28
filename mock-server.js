@@ -233,6 +233,19 @@ const routes = {
   "/v1/match_info": (params) => {
     return matchInfoFallback();
   },
+  "/v1/match_squad": (params) => ({
+    status: "success",
+    data: [
+      {
+        teamName: "Rajasthan Royals",
+        players: [
+          { id: "p1", name: "Brijesh Sharma", role: "Allrounder" },
+          { id: "p2", name: "Yash Raj Punja", role: "Allrounder" },
+          { id: "p3", name: "Sanju Samson", role: "Wicketkeeper Batter" }
+        ]
+      }
+    ]
+  }),
   "/v1/currentMatches": () => ({
     status: "success",
     data: [

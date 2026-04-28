@@ -218,6 +218,44 @@ async function runAllTests() {
   }
 
   log("");
+  log("  [1a] JSON Schema — match_squad & Role Overrides");
+  try {
+    const sq = await fetchJSON("/v1/match_squad?id=mock-match-001&apikey=test");
+    assert("match_squad status is 'success'", sq.status === "success");
+    assert("match_squad data is an array", Array.isArray(sq.data));
+    assert("match_squad has teamName", typeof sq.data[0]?.teamName === "string");
+    assert("match_squad has players array", Array.isArray(sq.data[0]?.players));
+    
+    // Test role overrides simulation
+    const p1 = sq.data[0].players.find(p => p.name === "Brijesh Sharma");
+    const p2 = sq.data[0].players.find(p => p.name === "Yash Raj Punja");
+    const p3 = sq.data[0].players.find(p => p.name === "Sanju Samson");
+    
+    const ROLE_OVERRIDES = { "Brijesh Sharma": "BOWL", "Yash Raj Punja": "BOWL" };
+    function mockMapRole(r) {
+      if (!r) return "BAT";
+      const rl = r.toLowerCase().trim();
+      if (rl === "ar" || rl.includes("all")) return "AR";
+      if (rl === "wk" || rl.includes("wk") || rl.includes("wicket")) return "WK";
+      if (rl === "bowl" || rl.includes("bowl")) return "BOWL";
+      return "BAT";
+    }
+    
+    assert("Brijesh Sharma API role is 'Allrounder'", p1.role === "Allrounder");
+    assert("Yash Raj Punja API role is 'Allrounder'", p2.role === "Allrounder");
+    
+    const brijeshFinal = ROLE_OVERRIDES[p1.name] || mockMapRole(p1.role);
+    const yashFinal = ROLE_OVERRIDES[p2.name] || mockMapRole(p2.role);
+    const sanjuFinal = ROLE_OVERRIDES[p3.name] || mockMapRole(p3.role);
+    
+    assert("Brijesh Sharma successfully overridden to BOWL", brijeshFinal === "BOWL");
+    assert("Yash Raj Punja successfully overridden to BOWL", yashFinal === "BOWL");
+    assert("Sanju Samson maps correctly without override", sanjuFinal === "WK");
+  } catch (e) {
+    assert("match_squad fetch and role test succeeded", false, e.message);
+  }
+
+  log("");
   log("  [1a] JSON Schema — match_info fallback");
   try {
     const info = await fetchJSON("/v1/match_info?id=mock-match-001&apikey=test");

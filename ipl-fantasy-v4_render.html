@@ -631,11 +631,6 @@
 
         // Auto-save: clear the booster in Firestore + refund inventory
         try {
-          await updateDoc(doc(db, "matches", activeMid), {
-            [`teams.${session.name}.booster`]: null,
-            [`teams.${session.name}.updatedAt`]: Date.now(),
-          });
-          // Refund the removed booster
           const mSnap = await getDoc(doc(db, "meta", "members"));
           const mems = mSnap.data() || {};
           const inv = {
@@ -645,11 +640,20 @@
             BST_DEFAULTS[savedBooster.type],
             (inv[savedBooster.type] ?? 0) + 1,
           );
+
+          const batch = writeBatch(db);
+          batch.update(doc(db, "matches", activeMid), {
+            [`teams.${session.name}.booster`]: null,
+            [`teams.${session.name}.updatedAt`]: Date.now(),
+          });
+          batch.set(doc(db, "meta", "members"), {
+            [session.name]: { boosters: inv }
+          }, { merge: true });
+
+          await batch.commit();
+
           if (!mems[session.name]) mems[session.name] = {};
           mems[session.name].boosters = inv;
-          await updateDoc(doc(db, "meta", "members"), {
-            [`${session.name}.boosters`]: inv,
-          });
 
           // Update local state ONLY after successful DB writes
           allMembers = mems;
@@ -739,12 +743,6 @@
         // AUTO-SAVE: team is already submitted — persist booster immediately.
         // This prevents the booster being lost if the member doesn't re-press Lock In.
         try {
-          await updateDoc(doc(db, "matches", activeMid), {
-            [`teams.${session.name}.booster`]: newBooster,
-            [`teams.${session.name}.updatedAt`]: Date.now(),
-          });
-
-          // Inventory: refund old booster (if any), deduct new one
           const mSnap = await getDoc(doc(db, "meta", "members"));
           const mems = mSnap.data() || {};
           const inv = {
@@ -760,11 +758,20 @@
             0,
             (inv[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
           );
+
+          const batch = writeBatch(db);
+          batch.update(doc(db, "matches", activeMid), {
+            [`teams.${session.name}.booster`]: newBooster,
+            [`teams.${session.name}.updatedAt`]: Date.now(),
+          });
+          batch.set(doc(db, "meta", "members"), {
+            [session.name]: { boosters: inv }
+          }, { merge: true });
+
+          await batch.commit();
+
           if (!mems[session.name]) mems[session.name] = {};
           mems[session.name].boosters = inv;
-          await updateDoc(doc(db, "meta", "members"), {
-            [`${session.name}.boosters`]: inv,
-          });
 
           // Update local state ONLY after successful DB writes
           allMembers = mems;
@@ -1228,7 +1235,13 @@
                 !ids.includes(memberSelectedMatchId)
               ) {
                 memberSelectedMatchId = primary || null;
-                localTeam = { players: [], captain: "", vc: "", booster: null };
+                const tSnap = primary ? getTeams(primary)[session.name] || {} : {};
+                localTeam = {
+                  players: tSnap.players || [],
+                  captain: tSnap.captain || "",
+                  vc: tSnap.vc || "",
+                  booster: tSnap.booster || null,
+                };
               }
               syncDerivedState();
               if (skipNextRefresh) return;
@@ -1851,8 +1864,14 @@
         await setDoc(doc(db, "meta", "members"), { [name]: newMemberData }, { merge: true });
         members[name] = newMemberData;
         allMembers = members;        session = { name, isAdmin: false };
-        localTeam = { players: [], captain: "", vc: "" };
         memberSelectedMatchId = currentMatchId;
+        const tJoinSnap = currentMatchId ? getTeams(currentMatchId)[name] || {} : {};
+        localTeam = {
+          players: tJoinSnap.players || [],
+          captain: tJoinSnap.captain || "",
+          vc: tJoinSnap.vc || "",
+          booster: tJoinSnap.booster || null,
+        };
         sessionSave();
         history.replaceState({}, "", location.pathname);
         showScreen("member");
@@ -7750,7 +7769,7 @@
           playerStats = {};
           allTeams = {};
           seasonTotals = {};
-          localTeam = { players: [], captain: "", vc: "" };
+          localTeam = { players: [], captain: "", vc: "", booster: null };
           adminSelectedMatchId = null;
           memberSelectedMatchId = null;
           Object.keys(matchUnsubs).forEach((mid) => {
@@ -8441,7 +8460,7 @@
         const remaining = allIds.filter((id) => id !== getActiveMid());
         const newPrimary = remaining[0] || "";
         adminSelectedMatchId = newPrimary || null;
-        localTeam = { players: [], captain: "", vc: "" };
+        localTeam = { players: [], captain: "", vc: "", booster: null };
         await updateDoc(doc(db, "meta", "game"), {
           currentMatchId: newPrimary,
           activeMatchIds: remaining,
@@ -8833,6 +8852,7 @@
       async function loadMatchPlayers(key, mid, firestoreMatchId) {
         if (!key || !mid) return;
         try {
+          const ROLE_OVERRIDES = { "Brijesh Sharma": "BOWL", "Yash Raj Punja": "BOWL" };
           // 1. Direct fetch using Match ID (prevents lag from list endpoints)
           const url = `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`;
           const res = await _cricFetch(url);
@@ -8857,7 +8877,7 @@
                   id: p.id,
                   name: p.name,
                   team: team.shortname || team.name,
-                  role: mapRole(p.role),
+                  role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
                 });
               });
             });
@@ -8878,7 +8898,7 @@
                     id: p.id,
                     name: p.name,
                     team: team.teamName || team.name || "Team",
-                    role: mapRole(p.role),
+                    role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
                   });
                 });
               });
@@ -10127,7 +10147,12 @@
             globalTickerData = (res.data || []).filter(m => 
               m.matchStarted && !m.matchEnded && (m.name.includes("IPL") || m.name.includes("Premier League"))
             );
-            if (globalTickerData.length > 0 && activeTab === "live") _doRefresh();
+            if (globalTickerData.length > 0) {
+              const urlParams = new URLSearchParams(window.location.search);
+              if (urlParams.get("tab") === "live" || urlParams.get("atab") === "live" || urlParams.get("tab") === "scoreboard" || urlParams.get("atab") === "scoreboard") {
+                _doRefresh();
+              }
+            }
           }
         } catch (e) { console.warn("[Ticker] Fetch failed", e); }
       }
