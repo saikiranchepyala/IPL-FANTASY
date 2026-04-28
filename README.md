@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.8.0** — [Changelog](#-changelog)
+**Current version: v3.8.1** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,13 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.8.1 — April 28, 2026
+**Security Hardening & Bug Fixes**
+- **XSS Vulnerability Sweep**: Replaced all fragile `.replace(/'/g, "\\'")` onclick escaping with `escAttr(JSON.stringify(...))`. Added `escAttr()` to all unescaped `value=""`, `data-p`, `data-team`, `data-name`, and `data-venue` attributes across ~45 interpolation sites. Zero unescaped user/API data flows into HTML attributes.
+- **Booster Race Condition (H2)**: Refactored team lock to use `writeBatch` — team submission and booster inventory update are now a single atomic Firestore operation, preventing inventory corruption from concurrent submissions.
+- **Silent Error Swallowing (H3)**: Replaced all `.catch(() => {})` and `.catch(() => null)` with `console.warn` logging so series cache and fetch failures are visible.
+- **PIN Migration**: Force-migrated all 22 remaining plaintext PINs to PBKDF2-SHA256 hashes. Legacy deadline shortened from May 15 to May 5.
 
 ### v3.8.0 — April 28, 2026
 **CricAPI Credit Optimization**

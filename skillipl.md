@@ -1,12 +1,38 @@
 ---
 name: ipl-fantasy-league
 description: "Full context skill for the IPL Fantasy League private web app — architecture, API, points system, bug fixes, design system."
-version: "3.8.0"
+version: "3.8.1"
 project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.8.0 — Project Intelligence
+# IPL Fantasy League v3.8.1 — Project Intelligence
+
+## 🛡️ Security Hardening & Bug Fixes (v3.8.1 — April 28, 2026)
+
+**Goal**: Eliminate all XSS vectors, fix the booster race condition, remove silent error swallowing, and complete PIN migration.
+
+### Fix 1 — XSS: onclick handlers (C1)
+Replaced all 6 instances of `.replace(/'/g, "\\'")` in onclick attributes with `escAttr(JSON.stringify(...))`. The old pattern was vulnerable because backslash escaping inside HTML-parsed JS strings can be bypassed (e.g., `'); alert(1); //`). `JSON.stringify` produces a properly quoted JS string, and `escAttr` makes it safe for the HTML attribute context.
+
+Affected locations: `setStrikerOverride`, `_viewMemberPitch`, `removePlayer` (×3), `adminChangePoolRole` data attribute.
+
+### Fix 2 — XSS: unescaped value="" attributes (C2)
+Added `escAttr()` to 14 `value="${...}"` interpolations where user/API data was injected raw. A `"` in any of these fields (match label, team name, search input, admin PIN, admin profile name, API key) would break out of the attribute. Also escaped `<option value>` for captain/VC selectors (×4 instances across member and admin views).
+
+### Fix 3 — XSS: unescaped data-* attributes (C3)
+Added `escAttr()` to ~25 `data-p`, `data-team`, `data-name`, `data-venue`, `data-id`, `data-t1`, `data-t2`, `data-t1img`, `data-t2img` attributes. The match selector button (line 8819) was using `.replace(/"/g, "")` which only stripped double quotes — replaced with proper `escAttr()`. Introduced `_ep = escAttr(p.name)` local variable in the stat editor renderer to avoid repeating the call 17 times.
+
+### Fix 4 — Booster race condition (H2)
+Refactored `handleLockTeam` to use `writeBatch`. Previously, team submission (`updateDoc` on match) and booster inventory update (`setDoc` on meta/members) were two separate Firestore operations. If two users locked simultaneously, the read-modify-write on booster inventory could desync. Now both writes are in a single atomic batch.
+
+### Fix 5 — Silent error swallowing (H3)
+Replaced `.catch(() => {})` (line 8015, cached series ID write) and `.catch(() => null)` (line 8131, series_info fetch) with `console.warn` logging. Failures are now visible in the console instead of silently dropped.
+
+### Fix 6 — PIN migration
+Ran a one-time Node script to force-migrate all 22 remaining plaintext PINs to PBKDF2-SHA256 hashes (600k iterations, member name as salt). Shortened `_PIN_LEGACY_DEADLINE` from 2026-05-15 to 2026-05-05 since no plaintext PINs remain.
+
+---
 
 ## ⚡ CricAPI Credit Optimization (v3.8.0 — April 28, 2026)
 
