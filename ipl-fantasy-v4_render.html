@@ -1679,7 +1679,7 @@
       }
       // Legacy cutoff: plaintext PINs accepted only until this date, then refused.
       // Gives existing members time to log in and auto-upgrade their PINs.
-      const _PIN_LEGACY_DEADLINE = new Date("2026-05-15T00:00:00Z").getTime();
+      const _PIN_LEGACY_DEADLINE = new Date("2026-05-05T00:00:00Z").getTime();
       // Compare entered PIN against stored value (hashed or legacy plaintext).
       // If legacy match succeeds, auto-upgrades the stored PIN to its hash.
       async function verifyPin(enteredPin, storedPin, salt, upgradeCallback) {
