@@ -2173,7 +2173,7 @@
       <!-- LEFT: player grid -->
       <div class="builder-grid-col">
         <div class="filter-bar">
-          <input class="sinp" id="pSearch" placeholder="🔍 Search player or team…" value="${curSearch}" onfocus="this.setSelectionRange(this.value.length, this.value.length)">
+          <input class="sinp" id="pSearch" placeholder="🔍 Search player or team…" value="${escAttr(curSearch)}" onfocus="this.setSelectionRange(this.value.length, this.value.length)">
           <div class="rtabs">${["ALL", "BAT", "BOWL", "AR", "WK"].map((r) => `<button class="rtab ${r === curRole ? "active" : ""}" data-r="${r}">${r}</button>`).join("")}</div>
         </div>
         <div class="pgrid" id="pgrid">${renderGrid(sel, curRole, curSearch, pool)}</div>
@@ -2221,7 +2221,7 @@
                   <div class="xi-row-name">${p} ${isC ? '<span class="xi-badge-c">C</span>' : isV ? '<span class="xi-badge-v">VC</span>' : ""}</div>
                   <div class="xi-row-meta">${isOverseas(p) ? '<span style="color:#7eb8f7;font-size:10px">✈</span> ' : ""}${ri[pObj.role] || ""} ${pObj.role} · ${normalizeTeam(pObj.team)} · <span style="color:var(--gold)">${cr}CR</span></div>
                 </div>
-                <button class="xi-remove" data-p="${p}" title="Remove">×</button>
+                <button class="xi-remove" data-p="${escAttr(p)}" title="Remove">×</button>
               </div>`;
               })
               .join("")}
@@ -2238,7 +2238,7 @@
             )
               .map(
                 (p) =>
-                  `<option value="${p}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
+                  `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
               )
               .join("")}</select></div>
             <div class="cs"><label>Vice-Captain (1.5×)</label><select id="vcSel">${sortXIByRole(
@@ -2247,7 +2247,7 @@
             )
               .map(
                 (p) =>
-                  `<option value="${p}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
+                  `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
               )
               .join("")}</select></div>
           </div>`
@@ -2518,7 +2518,7 @@
           const batsmenHtml = batsmen.slice(0, 2).map((b, idx) => {
             const isStr = idx === activeStrikerIdx;
             return `
-              <div class="csb-player-row ${isStr ? "striker-active" : ""}" onclick="setStrikerOverride('${escAttr(b.name).replace(/'/g, "\\'")}')" style="cursor:pointer">
+              <div class="csb-player-row ${isStr ? "striker-active" : ""}" onclick="setStrikerOverride(${escAttr(JSON.stringify(b.name))})" style="cursor:pointer">
                 <div class="csb-ns-info">
                   <span class="csb-ns-dot">${isStr ? "🏏" : "·"}</span>
                   <span class="csb-ns-name">${escAttr(b.name)}</span>
@@ -3082,7 +3082,7 @@
           ? "animation: ptsFlash 1.5s ease both;"
           : "";
 
-        const safeN = r.name.replace(/'/g, "\\'");
+        const safeN = escAttr(JSON.stringify(r.name));
         const booster = r.team.booster || null;
         const hasBst = !!booster;
         // Score-level badge for triple/double (revealed when match starts)
@@ -3103,7 +3103,7 @@
             <div class="lb-name">${escHtml(r.name)}${r.name === highlightName ? ' <span class="you">YOU</span>' : ""}</div>
             <div class="lb-tname">${escHtml(r.teamName)}${bstPill}</div>
           </div>
-          ${r.team.players?.length ? `<button class="lb-pitch-btn" onclick="window._viewMemberPitch('${mid}','${safeN}')" title="View ${escAttr(r.name)}'s pitch">🏟</button>` : ""}
+          ${r.team.players?.length ? `<button class="lb-pitch-btn" onclick="window._viewMemberPitch(${escAttr(JSON.stringify(mid))},${safeN})" title="View ${escAttr(r.name)}'s pitch">🏟</button>` : ""}
         </div>
         <div class="lb-chips">
           ${
@@ -4562,7 +4562,7 @@
             const _pcStyle = _ptc2
               ? `style="--pc-team-color:${_ptc2.primary}"`
               : "";
-            return `<div class="pcard ${s ? "pcard-on" : ""} ${d ? "pcard-dis" : ""} ${statusClass}" data-p="${p.name}" data-team="${p.team}" ${_pcStyle} ${d && reason ? 'title="' + reason + '"' : ""}>${avail === "impact" ? '<div class="pcard-impact-bar">⚡ IMPACT SUB</div>' : ""}${_tint}${_logo}<div style="position:relative;z-index:1">
+            return `<div class="pcard ${s ? "pcard-on" : ""} ${d ? "pcard-dis" : ""} ${statusClass}" data-p="${escAttr(p.name)}" data-team="${escAttr(p.team)}" ${_pcStyle} ${d && reason ? 'title="' + escAttr(reason) + '"' : ""}>${avail === "impact" ? '<div class="pcard-impact-bar">⚡ IMPACT SUB</div>' : ""}${_tint}${_logo}<div style="position:relative;z-index:1">
       ${s ? '<div class="pchk">✓</div>' : ""}
       ${avail === "playing" && !s ? '<div class="pcard-playing-dot"></div>' : ""}
       ${teamFull ? '<div class="team-cap-badge">MAX</div>' : ""}
@@ -4687,7 +4687,7 @@
                   <div class="xi-row-name">${p} ${isC ? '<span class="xi-badge-c">C</span>' : isV ? '<span class="xi-badge-v">VC</span>' : ""}</div>
                   <div class="xi-row-meta">${isOverseas(p) ? '<span style="color:#7eb8f7;font-size:10px">✈</span> ' : ""}${ri[pObj.role] || ""} ${pObj.role} · ${normalizeTeam(pObj.team)} · <span style="color:var(--gold)">${cr}CR</span></div>
                 </div>
-                <button class="xi-remove" data-p="${p}" title="Remove">×</button>
+                <button class="xi-remove" data-p="${escAttr(p)}" title="Remove">×</button>
               </div>`;
                   })
                   .join("");
@@ -4723,7 +4723,7 @@
                   )
                     .map(
                       (p) =>
-                        `<option value="${p}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
+                        `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
                     )
                     .join("")}</select></div>
                   <div class="cs"><label>Vice-Captain (1.5×)</label><select id="vcSel">${sortXIByRole(
@@ -4732,7 +4732,7 @@
                   )
                     .map(
                       (p) =>
-                        `<option value="${p}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
+                        `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
                     )
                     .join("")}</select></div>
                 </div>`;
@@ -4991,21 +4991,13 @@
             const matchRef = doc(db, "matches", saveMid);
             const prevBooster = (allTeams[session.name] || {}).booster || null;
             const newBooster = localTeam.booster || null;
-            await updateDoc(matchRef, {
-              [`teams.${session.name}`]: {
-                players: localTeam.players,
-                captain: localTeam.captain,
-                vc: localTeam.vc,
-                booster: newBooster,
-                submitted: true,
-                updatedAt: Date.now(),
-              },
-            });
-            // Update booster inventory if booster changed
-            if (JSON.stringify(prevBooster) !== JSON.stringify(newBooster)) {
+            const boosterChanged = JSON.stringify(prevBooster) !== JSON.stringify(newBooster);
+            // Read current booster inventory BEFORE writing, so the batch is atomic
+            let inv2 = null;
+            if (boosterChanged) {
               const mSnap2 = await getDoc(doc(db, "meta", "members"));
               const mems2 = mSnap2.data() || {};
-              const inv2 = {
+              inv2 = {
                 ...(mems2[session.name]?.boosters || BST_DEFAULTS),
               };
               if (prevBooster?.type)
@@ -5018,12 +5010,29 @@
                   0,
                   (inv2[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
                 );
-              await setDoc(doc(db, "meta", "members"), {
+            }
+            // Atomic batch: team + booster inventory written together
+            const batch = writeBatch(db);
+            batch.update(matchRef, {
+              [`teams.${session.name}`]: {
+                players: localTeam.players,
+                captain: localTeam.captain,
+                vc: localTeam.vc,
+                booster: newBooster,
+                submitted: true,
+                updatedAt: Date.now(),
+              },
+            });
+            if (boosterChanged && inv2) {
+              batch.set(doc(db, "meta", "members"), {
                 [session.name]: { boosters: inv2 }
               }, { merge: true });
-              if (!mems2[session.name]) mems2[session.name] = {};
-              mems2[session.name].boosters = inv2;
-              allMembers = mems2;
+            }
+            await batch.commit();
+            // Update local state after successful commit
+            if (boosterChanged && inv2) {
+              if (!allMembers[session.name]) allMembers[session.name] = {};
+              allMembers[session.name].boosters = inv2;
             }
             allTeams[session.name] = { ...localTeam, submitted: true };
             toast("Team saved! ✅");
@@ -5285,10 +5294,10 @@
         `
             : '<p class="muted" style="margin-bottom:12px">No match active. Pick one below →</p>'
         }
-        <div class="field"><label>Match Label</label><input id="matchLbl" type="text" value="${viewMatch.label || ""}" placeholder="e.g. MI vs CSK — Match 5"></div>
-        <div class="field"><label>Live Match ID (API)</label><input id="liveMatchId" type="text" value="${viewMatch.liveMatchId || ""}" placeholder="e.g. 3dd82a3e-…"></div>
-        <div class="field"><label>Team 1</label><input id="t1" type="text" value="${viewMatch.t1 || ""}" placeholder="Mumbai Indians"></div>
-        <div class="field"><label>Team 2</label><input id="t2" type="text" value="${viewMatch.t2 || ""}" placeholder="Chennai Super Kings"></div>
+        <div class="field"><label>Match Label</label><input id="matchLbl" type="text" value="${escAttr(viewMatch.label || "")}" placeholder="e.g. MI vs CSK — Match 5"></div>
+        <div class="field"><label>Live Match ID (API)</label><input id="liveMatchId" type="text" value="${escAttr(viewMatch.liveMatchId || "")}" placeholder="e.g. 3dd82a3e-…"></div>
+        <div class="field"><label>Team 1</label><input id="t1" type="text" value="${escAttr(viewMatch.t1 || "")}" placeholder="Mumbai Indians"></div>
+        <div class="field"><label>Team 2</label><input id="t2" type="text" value="${escAttr(viewMatch.t2 || "")}" placeholder="Chennai Super Kings"></div>
         <div class="match-type-toggle">
           <span class="mt-label">Match Type</span>
           <div class="mt-opts">
@@ -5380,7 +5389,7 @@
           <div class="step-body">
             <div class="step-label">API Key <a class="alink" href="https://cricketdata.org" target="_blank">get free →</a></div>
             <div style="display:flex;gap:8px">
-              <input id="cricKey" type="text" class="sinp" style="margin:0;flex:1" value="${metaGame.cricApiKey || ""}" placeholder="Paste your CricketData.org key">
+              <input id="cricKey" type="text" class="sinp" style="margin:0;flex:1" value="${escAttr(metaGame.cricApiKey || "")}" placeholder="Paste your CricketData.org key">
               <button class="btn-sm" onclick="adminSaveApiKey()" style="flex-shrink:0">Save</button>
             </div>
           </div>
@@ -5417,10 +5426,10 @@
                 (p) => `
               <span class="pool-chip" title="Click role to change">
                 ${escHtml(p.name)} <em>${normalizeTeam(p.team)}</em>
-                <select class="pool-role-sel" data-p="${p.name.replace(/'/g, "\\'")}" onchange="adminChangePoolRole(this)">
+                <select class="pool-role-sel" data-p="${escAttr(p.name)}" onchange="adminChangePoolRole(this)">
                   ${["BAT", "BOWL", "AR", "WK"].map((r) => `<option value="${r}" ${p.role === r ? "selected" : ""}>${r}</option>`).join("")}
                 </select>
-                <span style="color:var(--red);font-size:10px;cursor:pointer" onclick="removePlayer('${p.name.replace(/'/g, "\\'")}')">×</span>
+                <span style="color:var(--red);font-size:10px;cursor:pointer" onclick="removePlayer(${escAttr(JSON.stringify(p.name))})">×</span>
               </span>`,
               )
               .join("")}
@@ -6636,7 +6645,7 @@
 
       <div class="acard">
         <div class="acard-t">⚙️ League Settings</div>
-        <div class="field"><label>Admin PIN</label><input id="adminPinInp" type="text" maxlength="4" value="${metaGame.adminPin || "0000"}"></div>
+        <div class="field"><label>Admin PIN</label><input id="adminPinInp" type="text" maxlength="4" value="${escAttr(metaGame.adminPin || "0000")}"></div>
         <button class="btn-sm" onclick="adminSaveLeague()">Save</button>
       </div>
 
@@ -6644,10 +6653,10 @@
         <div class="acard-t">🏏 My Player Profile</div>
         <p class="muted" style="margin-bottom:12px">Set up your player identity so you can also participate in the league as a player.</p>
         <div class="field"><label>Your Name (as a player)</label>
-          <input id="adminPlayerName" type="text" value="${adminProfile.name || ""}" placeholder="e.g. Sai">
+          <input id="adminPlayerName" type="text" value="${escAttr(adminProfile.name || "")}" placeholder="e.g. Sai">
         </div>
         <div class="field"><label>Your Team Name</label>
-          <input id="adminTeamName" type="text" value="${adminProfile.teamName || ""}" placeholder="e.g. Sai's XI">
+          <input id="adminTeamName" type="text" value="${escAttr(adminProfile.teamName || "")}" placeholder="e.g. Sai's XI">
         </div>
         <button class="btn-sm" onclick="adminSaveProfile()">Save Profile</button>
         ${
@@ -6743,11 +6752,12 @@
                 pts > 0
                   ? `<span class="sc-pts-num" data-count-up="${pts}">0</span><span class="sc-pts-unit">pts</span>`
                   : `<span style="color:var(--muted2);font-size:18px">–</span>`;
+              const _ep = escAttr(p.name);
               return `<div class="stat-card ${_adRoleClass}" style="animation-delay:${stagger}ms">
       <div class="sc-hd">
-        <div><div class="sc-nm">${p.name}${outBadge}</div><div class="sc-tm">${ri[p.role] || ""} ${p.role} · ${normalizeTeam(p.team)}</div></div>
+        <div><div class="sc-nm">${escHtml(p.name)}${outBadge}</div><div class="sc-tm">${ri[p.role] || ""} ${p.role} · ${normalizeTeam(p.team)}</div></div>
         <div style="display:flex;align-items:center;gap:8px">
-          <select class="avail-sel" data-p="${p.name}" title="Availability">
+          <select class="avail-sel" data-p="${_ep}" title="Availability">
             <option value="" ${!pStatus ? "selected" : ""}>⚪</option>
             <option value="playing" ${pStatus === "playing" ? "selected" : ""}>🟢 Playing</option>
             <option value="notplaying" ${pStatus === "notplaying" ? "selected" : ""}>🔴 Not Playing</option>
@@ -6758,34 +6768,34 @@
       </div>
       <div class="sc-section-label">🏏 Batting</div>
       <div class="sc-inp">
-        <div class="si-g"><label>Runs</label><input type="number" class="si" data-f="bat_runs" data-p="${p.name}" value="${s.bat_runs ?? s.runs ?? 0}" min="0"></div>
-        <div class="si-g"><label>Balls</label><input type="number" class="si" data-f="bat_balls" data-p="${p.name}" value="${s.bat_balls ?? s.balls ?? 0}" min="0"></div>
-        <div class="si-g"><label>4s</label><input type="number" class="si" data-f="bat_4s" data-p="${p.name}" value="${s.bat_4s ?? s.fours ?? 0}" min="0"></div>
-        <div class="si-g"><label>6s</label><input type="number" class="si" data-f="bat_6s" data-p="${p.name}" value="${s.bat_6s ?? s.sixes ?? 0}" min="0"></div>
+        <div class="si-g"><label>Runs</label><input type="number" class="si" data-f="bat_runs" data-p="${_ep}" value="${s.bat_runs ?? s.runs ?? 0}" min="0"></div>
+        <div class="si-g"><label>Balls</label><input type="number" class="si" data-f="bat_balls" data-p="${_ep}" value="${s.bat_balls ?? s.balls ?? 0}" min="0"></div>
+        <div class="si-g"><label>4s</label><input type="number" class="si" data-f="bat_4s" data-p="${_ep}" value="${s.bat_4s ?? s.fours ?? 0}" min="0"></div>
+        <div class="si-g"><label>6s</label><input type="number" class="si" data-f="bat_6s" data-p="${_ep}" value="${s.bat_6s ?? s.sixes ?? 0}" min="0"></div>
       </div>
       <div class="sc-chk">
-        <label><input type="checkbox" class="sic" data-f="batted" data-p="${p.name}" ${s.batted ? "checked" : ""}> Batted</label>
-        <label><input type="checkbox" class="sic" data-f="bat_notOut" data-p="${p.name}" ${s.bat_notOut ?? s.notOut ? "checked" : ""}> Not Out</label>
+        <label><input type="checkbox" class="sic" data-f="batted" data-p="${_ep}" ${s.batted ? "checked" : ""}> Batted</label>
+        <label><input type="checkbox" class="sic" data-f="bat_notOut" data-p="${_ep}" ${s.bat_notOut ?? s.notOut ? "checked" : ""}> Not Out</label>
       </div>
       <div class="sc-section-label" style="margin-top:8px">🔴 Bowling</div>
       <div class="sc-inp">
-        <div class="si-g"><label>Wkts</label><input type="number" class="si" data-f="wickets" data-p="${p.name}" value="${s.wickets || 0}" min="0"></div>
-        <div class="si-g"><label>Ovrs</label><input type="number" class="si" data-f="overs" data-p="${p.name}" value="${s.overs || 0}" min="0" step="0.1"></div>
-        <div class="si-g"><label>RC</label><input type="number" class="si" data-f="runsConceded" data-p="${p.name}" value="${s.runsConceded || 0}" min="0"></div>
-        <div class="si-g"><label>Mdns</label><input type="number" class="si" data-f="maidens" data-p="${p.name}" value="${s.maidens || 0}" min="0"></div>
-        <div class="si-g"><label>LBW+B</label><input type="number" class="si" data-f="lbwBowled" data-p="${p.name}" value="${s.lbwBowled || 0}" min="0"></div>
+        <div class="si-g"><label>Wkts</label><input type="number" class="si" data-f="wickets" data-p="${_ep}" value="${s.wickets || 0}" min="0"></div>
+        <div class="si-g"><label>Ovrs</label><input type="number" class="si" data-f="overs" data-p="${_ep}" value="${s.overs || 0}" min="0" step="0.1"></div>
+        <div class="si-g"><label>RC</label><input type="number" class="si" data-f="runsConceded" data-p="${_ep}" value="${s.runsConceded || 0}" min="0"></div>
+        <div class="si-g"><label>Mdns</label><input type="number" class="si" data-f="maidens" data-p="${_ep}" value="${s.maidens || 0}" min="0"></div>
+        <div class="si-g"><label>LBW+B</label><input type="number" class="si" data-f="lbwBowled" data-p="${_ep}" value="${s.lbwBowled || 0}" min="0"></div>
       </div>
       <div class="sc-section-label" style="margin-top:8px">🧤 Fielding</div>
       <div class="sc-inp">
-        <div class="si-g"><label>Ctch</label><input type="number" class="si" data-f="catches" data-p="${p.name}" value="${s.catches || 0}" min="0"></div>
-        <div class="si-g"><label>St</label><input type="number" class="si" data-f="stumpings" data-p="${p.name}" value="${s.stumpings || 0}" min="0"></div>
-        <div class="si-g"><label>RO↑</label><input type="number" class="si" data-f="runOutDirect" data-p="${p.name}" value="${s.runOutDirect || 0}" min="0"></div>
-        <div class="si-g"><label>RO↗</label><input type="number" class="si" data-f="runOutIndirect" data-p="${p.name}" value="${s.runOutIndirect || 0}" min="0"></div>
+        <div class="si-g"><label>Ctch</label><input type="number" class="si" data-f="catches" data-p="${_ep}" value="${s.catches || 0}" min="0"></div>
+        <div class="si-g"><label>St</label><input type="number" class="si" data-f="stumpings" data-p="${_ep}" value="${s.stumpings || 0}" min="0"></div>
+        <div class="si-g"><label>RO↑</label><input type="number" class="si" data-f="runOutDirect" data-p="${_ep}" value="${s.runOutDirect || 0}" min="0"></div>
+        <div class="si-g"><label>RO↗</label><input type="number" class="si" data-f="runOutIndirect" data-p="${_ep}" value="${s.runOutIndirect || 0}" min="0"></div>
       </div>
       <div class="sc-chk" style="margin-top:6px">
-        <label><input type="checkbox" class="sic" data-f="playingXI" data-p="${p.name}" ${s.playingXI ? "checked" : ""}> Playing XI</label>
+        <label><input type="checkbox" class="sic" data-f="playingXI" data-p="${_ep}" ${s.playingXI ? "checked" : ""}> Playing XI</label>
       </div>
-      <button class="btn-save" data-p="${p.name}">Save</button>
+      <button class="btn-save" data-p="${_ep}">Save</button>
     </div>`;
             })
             .join("")
@@ -7834,10 +7844,10 @@
           const newChipHTML = `
             <span class="pool-chip" title="Click role to change">
               ${name} <em>${normalizeTeam(team)}</em>
-              <select class="pool-role-sel" data-p="${name.replace(/'/g, "\\'")}">
+              <select class="pool-role-sel" data-p="${escAttr(name)}">
                 ${["BAT", "BOWL", "AR", "WK"].map((r) => `<option value="${r}" ${role === r ? "selected" : ""}>${r}</option>`).join("")}
               </select>
-              <span style="color:var(--red);font-size:10px;cursor:pointer" onclick="removePlayer('${name.replace(/'/g, "\\'")}')">×</span>
+              <span style="color:var(--red);font-size:10px;cursor:pointer" onclick="removePlayer(${escAttr(JSON.stringify(name))})">×</span>
             </span>`;
           poolChipsContainer.insertAdjacentHTML("beforeend", newChipHTML);
 
@@ -8002,7 +8012,7 @@
               ].slice(0, 15);
               updateDoc(doc(db, "meta", "game"), {
                 cachedIntlSeriesIds: updated,
-              }).catch(() => {});
+              }).catch((e) => console.warn("[fetchMatches] Failed to cache series IDs:", e.message));
             }
             seriesIds = merged;
           }
@@ -8118,7 +8128,7 @@
                 [...autoSids].map((sid) =>
                   _cricFetch(
                     `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${sid}`,
-                  ).catch(() => null),
+                  ).catch((e) => { console.warn("[fetchMatches] series_info failed:", e.message); return null; }),
                 ),
               );
               const autoSeen = new Set(allMatches.map((m) => m.id));
@@ -8816,7 +8826,7 @@
       <div class="mopt-st">${status}${timeStr}</div>
       ${!hasSquad && !m.matchStarted ? '<div class="mopt-warn">⚠ Squad not announced yet — you can still select and add players manually</div>' : ""}
     </div>
-    <button class="btn-sm" data-id="${m.id}" data-name="${m.name || "Match"}" data-venue="${m.venue || ""}" data-t1="${(m.teamInfo?.[0]?.name || m.teams?.[0] || "").replace(/"/g, "")}" data-t2="${(m.teamInfo?.[1]?.name || m.teams?.[1] || "").replace(/"/g, "")}" data-t1img="${m.teamInfo?.[0]?.img || ""}" data-t2img="${m.teamInfo?.[1]?.img || ""}" data-fantasy="${m.fantasyEnabled === true ? "1" : "0"}">Select</button>
+    <button class="btn-sm" data-id="${escAttr(m.id)}" data-name="${escAttr(m.name || "Match")}" data-venue="${escAttr(m.venue || "")}" data-t1="${escAttr(m.teamInfo?.[0]?.name || m.teams?.[0] || "")}" data-t2="${escAttr(m.teamInfo?.[1]?.name || m.teams?.[1] || "")}" data-t1img="${escAttr(m.teamInfo?.[0]?.img || "")}" data-t2img="${escAttr(m.teamInfo?.[1]?.img || "")}" data-fantasy="${m.fantasyEnabled === true ? "1" : "0"}">Select</button>
   </div>`;
       }
 
