@@ -6,7 +6,7 @@ project: ipl-ssmb-fantasy-league
 stack: "HTML5/ES6+, Firebase (Firestore/Auth), CricAPI (CricketData.org), CSS3 (Modern Glassmorphism)"
 ---
 
-# IPL Fantasy League v3.10.0 — Project Intelligence
+# IPL Fantasy League v3.11.0 — Project Intelligence
 
 ## 🛡️ Security Hardening & Bug Fixes (v3.8.1 — April 28, 2026)
 

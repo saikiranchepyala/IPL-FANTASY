@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.10.0** — [Changelog](#-changelog)
+**Current version: v3.11.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,14 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.11.0 — April 29, 2026
+**Architectural Hardening & Code Quality**
+- **Resolved 30 ESLint issues**: Fixed all 13 errors and 17 warnings, including `no-undef` and `no-unused-vars`.
+- **Unified Module Scope**: Merged all independent `<script>` tags into the main module scope. This fixes cross-script dependency issues and enables strict `no-undef` enforcement.
+- **Dead Code Elimination**: Removed several unused variables (`matchHistory`, `xiRetryCount`, `_cricApiCalls`, etc.) and the redundant `renderXIChips` helper.
+- **Standardized Globals**: Replaced risky global function calls with explicit `window.` prefixes where required by module scoping rules.
+- **Improved Hygiene**: Converted `catch(e) {}` blocks to ES2019 `catch {}` and added safety guards to `ln(n)`.
 
 ### v3.10.0 — April 29, 2026
 **Final Architectural & Logic Hardening**
