@@ -432,7 +432,7 @@
           ${
             active
               ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="bst-active-pill">⚡ ${BST_LABELS[active.type]}${active.target ? " · " + (active.type === "team" ? active.target : fmtName(active.target)) : ""}</span>
+            <span class="bst-active-pill">⚡ ${BST_LABELS[active.type]}${active.target ? " · " + (active.type === "team" ? escHtml(active.target) : escHtml(fmtName(active.target))) : ""}</span>
             <button class="bst-sm-btn" onclick="window.removeBooster()">✕ Remove</button>
             <button class="bst-sm-btn" onclick="window.openBoosterOverlay()">Change</button>
           </div>`
@@ -1126,8 +1126,17 @@
           sessionStorage.removeItem("_adminOk");
         } catch (e) { console.warn(e); }
         session = { name: null, isAdmin: false };
-        stopAR();
-        if (_tickerInterval) {
+        // Reset all data globals to default empty states
+        metaGame = {};
+        allMembers = {};
+        seasonTotals = {};
+        activeMatches = {};
+        matchPlayers = [];
+        playerStats = {};
+        prevScores = {};
+        localTeam = { players: [], captain: "", vc: "", booster: null };
+
+        stopAR();        if (_tickerInterval) {
           clearInterval(_tickerInterval);
           _tickerInterval = null;
         }
@@ -1704,7 +1713,7 @@
   </div>
   <div class="card">
     <p class="brand-sub" style="text-align:center;margin-bottom:14px">You've been invited! 🎉</p>
-    <div class="join-badge">${code}</div>
+    <div class="join-badge">${escHtml(code)}</div>
     <div class="field"><label>Your Name</label><input id="joinName" type="text" placeholder="e.g. Rahul" maxlength="30"></div>
     <div class="field"><label>Team Name <span class="hint">(optional)</span></label><input id="joinTeamName" type="text" placeholder="e.g. Chennai Champions" maxlength="30"></div>
     <div class="field"><label>Choose a 4-digit PIN <span class="hint">(to log back in)</span></label>
@@ -1859,12 +1868,13 @@
         ).trim();
         const pin = pinVal(".pm");
         const err = document.getElementById("memberErr");
-        if (!name) {
-          err.textContent = "Enter your name";
+
+        const nameErr = validateName(name);
+        if (nameErr) {
+          err.textContent = nameErr;
           return;
         }
-        if (pin.length !== 4) {
-          err.textContent = "Enter your 4-digit PIN";
+        if (pin.length !== 4) {          err.textContent = "Enter your 4-digit PIN";
           return;
         }
         const snap = await getDoc(doc(db, "meta", "members"));
@@ -2398,7 +2408,7 @@
             )
               .map(
                 (p) =>
-                  `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
+                  `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${escHtml(fmtName(p))}</option>`,
               )
               .join("")}</select></div>
             <div class="cs"><label>Vice-Captain (1.5×)</label><select id="vcSel">${sortXIByRole(
@@ -2407,7 +2417,7 @@
             )
               .map(
                 (p) =>
-                  `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
+                  `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${escHtml(fmtName(p))}</option>`,
               )
               .join("")}</select></div>
           </div>`
@@ -3291,7 +3301,7 @@
                   match.locked,
                 );
                 const chipId = `lb-chip-${r.name.replace(/\s+/g, "_")}-${p.replace(/\s+/g, "_")}`;
-                return `<span class="lchip ${isC ? "lchip-c" : isV ? "lchip-vc" : ""}" id="${chipId}">${isC ? '<span class="lchip-badge">C</span>' : isV ? '<span class="lchip-badge lchip-badge-v">VC</span>' : ""}${isOverseas(p) ? '<span class="lchip-flag">✈</span>' : ""}${fmtName(p)}${_no}${bstBadge} <em id="${chipId}-pts">${Math.round(pts)}</em></span>`;
+                return `<span class="lchip ${isC ? "lchip-c" : isV ? "lchip-vc" : ""}" id="${chipId}">${isC ? '<span class="lchip-badge">C</span>' : isV ? '<span class="lchip-badge lchip-badge-v">VC</span>' : ""}${isOverseas(p) ? '<span class="lchip-flag">✈</span>' : ""}${escHtml(fmtName(p))}${_no}${bstBadge} <em id="${chipId}-pts">${Math.round(pts)}</em></span>`;
               })
               .join("") || '<span class="muted-s">No team submitted</span>'
           }
@@ -4763,7 +4773,7 @@
         return sel
           .map(
             (p) =>
-              `<span class="xchip ${p === cap ? "xchip-c" : p === vc ? "xchip-vc" : ""}">${p === cap ? "<b>C</b>" : p === vc ? "<b>VC</b>" : ""}${ln(p)}</span>`,
+              `<span class="xchip ${p === cap ? "xchip-c" : p === vc ? "xchip-vc" : ""}">${p === cap ? "<b>C</b>" : p === vc ? "<b>VC</b>" : ""}${escHtml(ln(p))}</span>`,
           )
           .join("");
       }
@@ -4892,7 +4902,7 @@
                   )
                     .map(
                       (p) =>
-                        `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${fmtName(p)}</option>`,
+                        `<option value="${escAttr(p)}" ${p === localTeam.captain ? "selected" : ""}>${escHtml(fmtName(p))}</option>`,
                     )
                     .join("")}</select></div>
                   <div class="cs"><label>Vice-Captain (1.5×)</label><select id="vcSel">${sortXIByRole(
@@ -4901,7 +4911,7 @@
                   )
                     .map(
                       (p) =>
-                        `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${fmtName(p)}</option>`,
+                        `<option value="${escAttr(p)}" ${p === localTeam.vc ? "selected" : ""}>${escHtml(fmtName(p))}</option>`,
                     )
                     .join("")}</select></div>
                 </div>`;
@@ -7336,12 +7346,6 @@
             }
           });
 
-          // Write season totals + finalized flag together before releasing the refresh block
-          const batch = writeBatch(db);
-          batch.set(doc(db, "season", "totals"), totals, { merge: true });
-          batch.update(doc(db, "matches", activeMid), { finalized: true });
-          await batch.commit();
-
           // Remove finalized match from activeMatchIds and clear currentMatchId if needed
           const remaining = (metaGame.activeMatchIds || []).filter(
             (id) => id !== activeMid,
@@ -7350,7 +7354,13 @@
           if (currentMatchId === activeMid) {
             updates.currentMatchId = remaining[0] || "";
           }
-          await updateDoc(doc(db, "meta", "game"), updates);
+
+          // Write season totals + finalized flag + game state together before releasing the refresh block
+          const batch = writeBatch(db);
+          batch.set(doc(db, "season", "totals"), totals, { merge: true });
+          batch.update(doc(db, "matches", activeMid), { finalized: true });
+          batch.update(doc(db, "meta", "game"), updates);
+          await batch.commit();
 
           // Reset selected match synchronously so the next refreshView shows a clean state
           adminSelectedMatchId = remaining[0] || null;
