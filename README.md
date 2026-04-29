@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.9.1** — [Changelog](#-changelog)
+**Current version: v3.10.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,16 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.10.0 — April 29, 2026
+**Final Architectural & Logic Hardening**
+- **Atomic Match Counter**: Implemented a Firestore transaction for sequential `matchNum` generation. Prevents collisions if multiple admins create matches simultaneously.
+- **Match-Scoped Pollers**: Refactored the `autoFetchStats` re-entrancy guard to be match-specific. Multiple active matches can now be polled independently without blocking each other.
+- **Robust PIN Upgrade**: The legacy PIN auto-upgrade now `awaits` the database write and handles failures, preventing users from being locked out due to transient network errors during migration.
+- **CricAPI Proxy Support**: Added architectural support for routing API calls through a Netlify Function. Includes a "Proxy Toggle" in League Settings to hide the API key from visitors.
+- **Secure Join Links**: Swapped `Math.random()` for `crypto.getRandomValues()` for higher-entropy invitation code generation.
+- **ESLint Hardening**: Re-enabled `no-undef` rule and declared browser/firebase globals to catch typos in the 17k-line codebase.
+- **Hygiene**: Added null-guards to name helpers, switched animations to `textContent`, and removed exposed debug scorecard functions from production.
 
 ### v3.9.1 — April 29, 2026
 **Critical Security & Atomicity Fixes**
