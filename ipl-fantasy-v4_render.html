@@ -18,7 +18,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" />
@@ -4538,7 +4538,14 @@
       // ── Global ID Cache — helps thumbnails show up for old matches ──
       let PLAYER_CACHE = {};
       try {
-        PLAYER_CACHE = JSON.parse(localStorage.getItem('ipl_player_cache') || '{}');
+        const raw = localStorage.getItem('ipl_player_cache');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          // TTL check: 7 days (604800000 ms)
+          if (parsed._ts && Date.now() - parsed._ts < 604800000) {
+            PLAYER_CACHE = parsed;
+          }
+        }
       } catch(e) {}
 
       function saveToPlayerCache(players) {
@@ -4551,11 +4558,11 @@
         });
         if (changed) {
           try {
+            PLAYER_CACHE._ts = Date.now();
             localStorage.setItem('ipl_player_cache', JSON.stringify(PLAYER_CACHE));
           } catch(e) {}
         }
       }
-
       // Normalize IPL team shortnames — CricAPI sometimes appends W (e.g. RCBW→RCB)
       const IPL_SHORT_MAP = {
         RCBW: "RCB",
@@ -8805,7 +8812,7 @@
             `<div class="match-group-label">✓ RECENTLY ENDED</div>` +
             ended.map(matchOptHTML).join("");
 
-        if (append) list.innerHTML += html;
+        if (append) list.insertAdjacentHTML('beforeend', html);
         else list.innerHTML = html;
 
         const activeMid = getActiveMid();
