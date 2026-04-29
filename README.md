@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.8.2** — [Changelog](#-changelog)
+**Current version: v3.9.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,15 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.9.0 — April 29, 2026
+**Performance Architecture & Mobile Hardening**
+- **Targeted DOM Updates (Point 3)**: Implemented surgical `textContent` updates for the Live Score Pill and Leaderboard scores. The app no longer destroys/rebuilds the entire DOM on every score tick, eliminating UI flicker and significantly reducing CPU/Battery usage.
+- **Mobile GPU Optimization**: Automatically strips `backdrop-filter` and infinite decorative animations on devices under 768px. Eliminated all `will-change: transform` site-wide to prevent GPU tile exhaustion on mid-range Androids.
+- **Layout Reflow Cleanup (Point 7)**: Removed all forced synchronous reflow (`offsetHeight`) hacks, ensuring buttery smooth scrolling during live match updates.
+- **Redundant Re-render Short-Circuit (Point 8)**: Added JSON-stringified comparison checks to all Firestore `onSnapshot` listeners. The app now aborts the refresh loop if the incoming data hasn't actually changed.
+- **Cold-Load Wins**: Optimized Google Fonts payload and added `<link rel="modulepreload">` for Firebase SDKs to speed up First Contentful Paint.
+- **Housekeeping**: Hardened `.gitignore` with `.env*` patterns and implemented a 7-day TTL expiration for the local player cache.
 
 ### v3.8.2 — April 28, 2026
 **Robustness & Bug Fixes**
