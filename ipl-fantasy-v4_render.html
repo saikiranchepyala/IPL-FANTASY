@@ -66,7 +66,6 @@
       window.memberMatchTotal = (t, s, p) => (typeof memberMatchTotal === "function" ? memberMatchTotal(t, s, p) : 0);
       window.calcPoints = (s) => (typeof calcPoints === "function" ? calcPoints(s) : 0);
       window.toRealOvers = (o) => (typeof toRealOvers === "function" ? toRealOvers(o) : 0);
-      window.robustMatch = (n) => (typeof robustMatch === "function" ? robustMatch(n) : n);
       window.resolveTeamKey = (t) => (typeof resolveTeamKey === "function" ? resolveTeamKey(t) : "");
 
       // ─────────────────────────────────────────────
@@ -351,23 +350,6 @@
         double: "2× DOUBLE",
         team: "TEAM 2×",
       };
-      const BST_COLORS = {
-        triple: {
-          bg: "rgba(139,92,246,.15)",
-          border: "rgba(139,92,246,.5)",
-          color: "#a78bfa",
-        },
-        double: {
-          bg: "rgba(59,130,246,.15)",
-          border: "rgba(59,130,246,.5)",
-          color: "#60a5fa",
-        },
-        team: {
-          bg: "rgba(245,158,11,.15)",
-          border: "rgba(245,158,11,.5)",
-          color: "#f59e0b",
-        },
-      };
       const BST_TEAM_KEYS = [
         "RCB",
         "MI",
@@ -420,7 +402,6 @@
         const total = inv.triple + inv.double + inv.team;
         if (total === 0 && !active) return "";
         const chip = (type) => {
-          const c = BST_COLORS[type];
           const rem = inv[type];
           const empty = rem === 0 && active?.type !== type;
           return `<span class="bst-chip bst-chip-${type}${empty ? " bst-chip-empty" : ""}"
@@ -908,7 +889,6 @@
       let metaGame = {}; // /meta/game  { currentMatchId, activeMatchIds, adminPin, joinCode }
       let allMembers = {}; // /meta/members
       let seasonTotals = {}; // /season/totals
-      let matchHistory = [];
       let localTeam = { players: [], captain: "", vc: "", booster: null };
       let prevScores = {}; // { memberName: pts } for points flash animation
 
@@ -1000,7 +980,7 @@
                 const sRes = await _cricFetch(`https://api.cricapi.com/v1/players?apikey=${cKey}&offset=0&search=${encodeURIComponent(p.name)}`);
                 const found = (sRes.data || []).find(f => f.name.toLowerCase() === p.name.toLowerCase()) || sRes.data?.[0];
                 if (found) idMap[p.name.toLowerCase()] = found.id;
-              } catch(e) {}
+              } catch {}
             }
           }
 
@@ -1046,7 +1026,6 @@
         arSecs = 0;
       window.arStoredSecs = 60;
       // CricAPI quota tracker (resets daily; persisted in localStorage to survive reloads)
-      let _cricApiCalls = 0; 
       function _trackApiCall() {
         const key = "cric_api_calls_" + new Date().toDateString();
         let calls = parseInt(localStorage.getItem(key) || "0");
@@ -1057,8 +1036,7 @@
         calls++;
         try {
           localStorage.setItem(key, String(calls));
-        } catch (e) { console.warn(e); }
-        _cricApiCalls = calls; // keep global in sync for UI/logic if needed
+        } catch {}
 
         if (calls === 1800)
           toast("⚠️ CricAPI quota: 1800/2000 calls used today", "err");
@@ -1067,8 +1045,7 @@
           stopAR();
         }
         return true; // The call that just happened is within the limit
-      }
-      async function _cricFetch(url, opts = {}) {
+      }      async function _cricFetch(url, opts = {}) {
         if (!_trackApiCall())
           throw new Error("CricAPI daily quota exhausted (2000 calls)");
 
@@ -1107,10 +1084,8 @@
       let matchUnsubs = {}; // { [matchId]: unsubFn }
       let curRole = "ALL",
         curSearch = ""; // persist across member re-renders
-      let xiRetryCount = 0; // reset on each match switch
       let _liveView = "leaderboard"; // "leaderboard" | "pitch" | "stats" — live tab sub-view
       let _lsvGen = 0; // increments on tab switch; cancels stale RAF scoreboard patches
-      let _pitchViewActive = false; // kept for backward compat; mirrors _liveView === "pitch"
       let _pvPrevPts = {}; // previous pts snapshot for delta animation
       let _pvMatchCache = {}; // matchId → match data for member pitch overlay
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
@@ -2110,7 +2085,6 @@
         playerStatus = {};
         curRole = "ALL";
         curSearch = "";
-        xiRetryCount = 0;
         const t = getTeams(mid)[session.name] || {};
         localTeam = {
           players: t.players || [],
@@ -2699,12 +2673,12 @@
           };
         });
 
-        const zonesHtml = zonesRaw.sort((a, b) => (a.isBatting ? 1 : -1)).map(z => z.html).join("");
+        const zonesHtml = zonesRaw.sort((a) => (a.isBatting ? 1 : -1)).map(z => z.html).join("");
 
         // Crease Logic — Dynamic Striker Block
         let creaseHtml = "";
         if (isLive && (batsmen.length > 0 || bowler)) {
-          const strikerIdx = batsmen.findIndex((b) => b.strike);
+          const strikerIdx = batsmen.findIndex((player) => player.strike);
           const activeStrikerIdx = strikerIdx !== -1 ? strikerIdx : 0;
           const batsmenHtml = batsmen.slice(0, 2).map((b, idx) => {
             const isStr = idx === activeStrikerIdx;
@@ -2998,7 +2972,6 @@
         // Only "leaderboard" and "pitch" are valid inside the Live Scores tab.
         // "stats" is now the standalone Live Stats tab — switchTab('scoreboard').
         _liveView = view === "pitch" ? "pitch" : "leaderboard";
-        _pitchViewActive = (_liveView === "pitch");
         refreshView();
       };
 
@@ -3499,7 +3472,7 @@
         let snap;
         try {
           snap = await getDoc(doc(db, "matches", matchId));
-        } catch (e) {
+        } catch {
           toast("Could not load match", "err");
           return;
         }
@@ -3829,14 +3802,14 @@
             const snap = await getDoc(doc(db, "matches", matchId));
             if (!snap.exists()) {
               toast("Match not found", "err");
-              switchTab("history");
+              window.switchTab("history");
               return;
             }
             const d = snap.data();
             match = { ...d, stats: d.stats || {}, teams: d.teams || {} };
-          } catch (e) {
+          } catch {
             toast("Could not load match", "err");
-            switchTab("history");
+            window.switchTab("history");
             return;
           }
         }
@@ -4264,14 +4237,14 @@
             const snap = await getDoc(doc(db, "matches", matchId));
             if (!snap.exists()) {
               toast("Match not found", "err");
-              switchAdminTab("history");
+              window.switchAdminTab("history");
               return;
             }
             const d = snap.data();
             match = { ...d, stats: d.stats || {}, teams: d.teams || {} };
-          } catch (e) {
+          } catch {
             toast("Could not load match", "err");
-            switchAdminTab("history");
+            window.switchAdminTab("history");
             return;
           }
         }
@@ -4577,7 +4550,7 @@
             PLAYER_CACHE = parsed;
           }
         }
-      } catch(e) {}
+      } catch {}
 
       function saveToPlayerCache(players) {
         let changed = false;
@@ -4591,7 +4564,7 @@
           try {
             PLAYER_CACHE._ts = Date.now();
             localStorage.setItem('ipl_player_cache', JSON.stringify(PLAYER_CACHE));
-          } catch(e) {}
+          } catch {}
         }
       }
       // Normalize IPL team shortnames — CricAPI sometimes appends W (e.g. RCBW→RCB)
@@ -4787,15 +4760,6 @@
       ${avail === "notplaying" ? '<div class="pcard-np-label">✕ NOT PLAYING</div>' : ""}
     </div></div>`;
           })
-          .join("");
-      }
-
-      function renderXIChips(sel, cap, vc) {
-        return sel
-          .map(
-            (p) =>
-              `<span class="xchip ${p === cap ? "xchip-c" : p === vc ? "xchip-vc" : ""}">${p === cap ? "<b>C</b>" : p === vc ? "<b>VC</b>" : ""}${escHtml(ln(p))}</span>`,
-          )
           .join("");
       }
 
@@ -5309,7 +5273,6 @@
         playerStatus = {};
         curRole = "ALL";
         curSearch = "";
-        xiRetryCount = 0;
         _lastAmbientMid = null; // force ambient re-inject for the new match
         syncDerivedState();
 
@@ -6308,7 +6271,7 @@
           statsUpdate2["stats." + pName] = s;
         });
 
-        cleanupGhostStats(activeMid2, true); // fix ghost stats in-memory; main write below handles Firestore
+        window.cleanupGhostStats(activeMid2, true); // fix ghost stats in-memory; main write below handles Firestore
         skipNextRefresh = true; // suppress onSnapshot re-render — we do our own below
         updateDoc(doc(db, "matches", activeMid2), statsUpdate2)
           .then(function () {
@@ -6358,7 +6321,7 @@
         let data;
         try {
           data = JSON.parse(raw);
-        } catch (e) {
+        } catch {
           toast("Invalid JSON — check paste", "err");
           return;
         }
@@ -6572,18 +6535,18 @@
               : s.overs >= 2
                 ? Math.round((s.runsConceded / s.overs) * 10) / 10
                 : null;
-          const { _lastEco, ...clean } = s;
           playerStats[n] = {
             ...(playerStats[n] || {}),
-            ...clean,
+            ...s,
             eco,
             playingXI: true,
           };
-          statsUpdate[`stats.${n}.wickets`] = clean.wickets;
-          statsUpdate[`stats.${n}.overs`] = clean.overs;
-          statsUpdate[`stats.${n}.runsConceded`] = clean.runsConceded;
-          statsUpdate[`stats.${n}.maidens`] = clean.maidens;
-          statsUpdate[`stats.${n}.lbwBowled`] = clean.lbwBowled;
+          delete playerStats[n]._lastEco;
+          statsUpdate[`stats.${n}.wickets`] = s.wickets;
+          statsUpdate[`stats.${n}.overs`] = s.overs;
+          statsUpdate[`stats.${n}.runsConceded`] = s.runsConceded;
+          statsUpdate[`stats.${n}.maidens`] = s.maidens;
+          statsUpdate[`stats.${n}.lbwBowled`] = s.lbwBowled;
           if (eco != null) statsUpdate[`stats.${n}.eco`] = eco;
           statsUpdate[`stats.${n}.playingXI`] = true;
           updated++;
@@ -8165,7 +8128,6 @@
         }
         const isIPL = _matchType === "ipl";
         const isDomestic = _matchType === "domestic";
-        const matchType = _matchType;
         const btn = document.getElementById("fetchMatchBtn");
         btn.textContent = "Fetching…";
         btn.disabled = true;
@@ -8858,9 +8820,8 @@
             ended.map(matchOptHTML).join("");
 
         if (append) list.insertAdjacentHTML('beforeend', html);
-        else list.innerHTML = html;
+        list.innerHTML = html;
 
-        const activeMid = getActiveMid();
         list.querySelectorAll("button[data-id]").forEach((b) => {
           b.onclick = async () => {
             const mid = b.dataset.id,
@@ -10433,10 +10394,6 @@
         if (b2) b2.style.background = hexToRgba(secondary, 0.45);
       }
 
-      function ln(n) {
-        if (!n) return "";
-        return n.split(" ").pop();
-      }
       function fmtName(n) {
         if (!n) return "";
         const parts = n.split(" ").filter(Boolean);
@@ -10515,6 +10472,142 @@
       function showError(m) {
         document.getElementById("app").innerHTML =
           `<div class="screen-center"><p style="color:#ef4444">${escAttr(m)}</p></div>`;
+      }
+
+      /* ── Theme System ── */
+      const VALID_THEMES = [
+        "titanium-gold",
+        "plum-noir",
+        "midnight",
+        "dracula",
+        "github-dimmed",
+        "monokai-pro",
+        "sakura-night",
+        "retro-terminal",
+        "emerald-pitch",
+        "solar-flare",
+        "aurora-borealis",
+        "royal-bengal",
+        "volcanic-obsidian",
+        "deep-cosmos",
+        "bronze-circuit",
+        "neon-cyberpunk",
+        "synthwave",
+        "blood-moon",
+        "void-amber",
+        "neon-dusk",
+      ];
+
+      /* ── Apply theme: Task 4 logic ── */
+      window.setDashboardTheme = function (themeName) {
+        if (!VALID_THEMES.includes(themeName)) return;
+        // Update both for maximum compatibility across older/newer CSS selectors
+        document.documentElement.setAttribute("data-theme", themeName);
+        document.body.setAttribute("data-theme", themeName);
+
+        try {
+          localStorage.setItem("ipl_theme_v2026", themeName);
+          // Keep legacy key for compatibility with existing components
+          localStorage.setItem("ipl-theme", themeName);
+        } catch (e) { console.warn(e); }
+
+        syncActiveState(themeName);
+      };
+
+      /* ── Manual Strike Override ── */
+      window.setStrikerOverride = async function (playerName) {
+        const mid = getActiveMid();
+        if (!mid) return;
+        const match = getMatch(mid);
+        const batsmen = (match.currentBatsmen || []).map((b) => ({
+          ...b,
+          strike: b.name === playerName,
+        }));
+        try {
+          await updateDoc(doc(db, "matches", mid), {
+            currentBatsmen: batsmen,
+          });
+          toast(`Strike moved to ${playerName} 🏏`);
+        } catch (e) {
+          toast("Error: " + e.message, "err");
+        }
+      };
+
+      // Alias existing calls
+      window.setGlobalTheme = window.setDashboardTheme;
+
+      /* ── Mark the active option in the dropdown ── */
+      function syncActiveState(active) {
+        var opts = document.querySelectorAll(".theme-option");
+        opts.forEach(function (btn) {
+          btn.classList.toggle("active", btn.dataset.theme === active);
+        });
+      }
+
+      /* ── Toggle dropdown open/close ── */
+      function bindToggle() {
+        var btn = document.getElementById("themeToggleBtn");
+        var dd = document.getElementById("themeDropdown");
+        if (!btn || !dd) return;
+
+        btn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          dd.classList.toggle("open");
+        });
+
+        document.addEventListener("click", function () {
+          dd.classList.remove("open");
+        });
+
+        dd.addEventListener("click", function (e) {
+          e.stopPropagation();
+        });
+
+        /* Wire each option button */
+        dd.querySelectorAll(".theme-option").forEach(function (opt) {
+          opt.addEventListener("click", function () {
+            window.setGlobalTheme(opt.dataset.theme);
+            dd.classList.remove("open");
+          });
+        });
+      }
+
+      /* ── Init: restore saved theme, then watch for nav renders ── */
+      function initTheme() {
+        var saved = "";
+        try {
+          saved =
+            localStorage.getItem("ipl_theme_v2026") ||
+            localStorage.getItem("ipl-theme") ||
+            "";
+        } catch (e) { console.warn(e); }
+        var theme = VALID_THEMES.includes(saved) ? saved : "midnight";
+        document.documentElement.setAttribute("data-theme", theme);
+        document.body.setAttribute("data-theme", theme);
+
+        /* Re-bind toggle whenever the nav is re-rendered into DOM */
+        var observer = new MutationObserver(function () {
+          var btn = document.getElementById("themeToggleBtn");
+          if (btn && !btn._themeBound) {
+            btn._themeBound = true;
+            bindToggle();
+            syncActiveState(
+              document.documentElement.getAttribute("data-theme") ||
+                "midnight",
+            );
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        /* Bind immediately if nav already exists */
+        bindToggle();
+        syncActiveState(theme);
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initTheme);
+      } else {
+        initTheme();
       }
     </script>
     <style>
@@ -17762,148 +17855,6 @@
           _spaused = document.hidden;
           if (!_spaused) requestAnimationFrame(_scTick);
         });
-      })();
-    </script>
-
-    <!-- ═══════════════════════════════════════════════════
-         MULTI-THEME ENGINE — setDashboardTheme + persistence
-    ═══════════════════════════════════════════════════ -->
-    <script>
-      (function () {
-        var VALID_THEMES = [
-          "titanium-gold",
-          "plum-noir",
-          "midnight",
-          "dracula",
-          "github-dimmed",
-          "monokai-pro",
-          "sakura-night",
-          "retro-terminal",
-          "emerald-pitch",
-          "solar-flare",
-          "aurora-borealis",
-          "royal-bengal",
-          "volcanic-obsidian",
-          "deep-cosmos",
-          "bronze-circuit",
-          "neon-cyberpunk",
-          "synthwave",
-          "blood-moon",
-          "void-amber",
-          "neon-dusk",
-        ];
-
-        /* ── Apply theme: Task 4 logic ── */
-        window.setDashboardTheme = function (themeName) {
-          if (!VALID_THEMES.includes(themeName)) return;
-          // Update both for maximum compatibility across older/newer CSS selectors
-          document.documentElement.setAttribute("data-theme", themeName);
-          document.body.setAttribute("data-theme", themeName);
-
-          try {
-            localStorage.setItem("ipl_theme_v2026", themeName);
-            // Keep legacy key for compatibility with existing components
-            localStorage.setItem("ipl-theme", themeName);
-          } catch (e) { console.warn(e); }
-
-          syncActiveState(themeName);
-        };
-
-        /* ── Manual Strike Override ── */
-        window.setStrikerOverride = async function (playerName) {
-          const mid = getActiveMid();
-          if (!mid) return;
-          const match = getMatch(mid);
-          const batsmen = (match.currentBatsmen || []).map((b) => ({
-            ...b,
-            strike: b.name === playerName,
-          }));
-          try {
-            await updateDoc(doc(db, "matches", mid), {
-              currentBatsmen: batsmen,
-            });
-            toast(`Strike moved to ${playerName} 🏏`);
-          } catch (e) {
-            toast("Error: " + e.message, "err");
-          }
-        };
-
-        // Alias existing calls
-        window.setGlobalTheme = window.setDashboardTheme;
-
-        /* ── Mark the active option in the dropdown ── */
-        function syncActiveState(active) {
-          var opts = document.querySelectorAll(".theme-option");
-          opts.forEach(function (btn) {
-            btn.classList.toggle("active", btn.dataset.theme === active);
-          });
-        }
-
-        /* ── Toggle dropdown open/close ── */
-        function bindToggle() {
-          var btn = document.getElementById("themeToggleBtn");
-          var dd = document.getElementById("themeDropdown");
-          if (!btn || !dd) return;
-
-          btn.addEventListener("click", function (e) {
-            e.stopPropagation();
-            dd.classList.toggle("open");
-          });
-
-          document.addEventListener("click", function () {
-            dd.classList.remove("open");
-          });
-
-          dd.addEventListener("click", function (e) {
-            e.stopPropagation();
-          });
-
-          /* Wire each option button */
-          dd.querySelectorAll(".theme-option").forEach(function (opt) {
-            opt.addEventListener("click", function () {
-              window.setGlobalTheme(opt.dataset.theme);
-              dd.classList.remove("open");
-            });
-          });
-        }
-
-        /* ── Init: restore saved theme, then watch for nav renders ── */
-        function initTheme() {
-          var saved = "";
-          try {
-            saved =
-              localStorage.getItem("ipl_theme_v2026") ||
-              localStorage.getItem("ipl-theme") ||
-              "";
-          } catch (e) { console.warn(e); }
-          var theme = VALID_THEMES.includes(saved) ? saved : "midnight";
-          document.documentElement.setAttribute("data-theme", theme);
-          document.body.setAttribute("data-theme", theme);
-
-          /* Re-bind toggle whenever the nav is re-rendered into DOM */
-          var observer = new MutationObserver(function () {
-            var btn = document.getElementById("themeToggleBtn");
-            if (btn && !btn._themeBound) {
-              btn._themeBound = true;
-              bindToggle();
-              syncActiveState(
-                document.documentElement.getAttribute("data-theme") ||
-                  "midnight",
-              );
-            }
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-
-          /* Bind immediately if nav already exists */
-          bindToggle();
-          syncActiveState(theme);
-        }
-
-        if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", initTheme);
-        } else {
-          initTheme();
-        }
       })();
     </script>
   </body>
