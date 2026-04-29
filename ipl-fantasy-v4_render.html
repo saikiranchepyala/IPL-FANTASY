@@ -1116,7 +1116,8 @@
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
       let _matchType = "ipl"; // 'ipl' | 'international' | 'domestic'
       const _autoFetchRunning = new Set(); // re-entrancy guard for autoFetchStats (match-scoped)
-      let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls      let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
+      let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls
+      let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
 
       // ── Session persistence ──
       function sessionSave() {
@@ -1330,9 +1331,8 @@
           else showScreen("login");
         } catch (e) {
           console.warn("Boot error:", e);
-          showError("Could not connect to the database. Check your internet connection and try refreshing.");
-        }
-      }
+          showError(`Database Connection Failed: ${e.message || "Unknown error"}. Check your Firebase settings and internet connection.`);
+        }      }
 
       function subscribeMatch(db, mid) {
         if (matchUnsubs[mid]) return; // already subscribed
