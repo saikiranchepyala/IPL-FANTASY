@@ -1428,9 +1428,134 @@
         if (_refreshTimer) clearTimeout(_refreshTimer);
         _refreshTimer = setTimeout(_doRefresh, 80);
       }
+      function trySurgicalUpdate() {
+        const mid = getActiveMid();
+        const match = getMatch(mid);
+        if (!mid || !match.label) return false;
+
+        // 1. Surgical Update for Score Pill
+        const pill = document.getElementById("scorePill");
+        if (pill) {
+          const scores = match.score || [];
+          const pillScores = attributeScores(match, scores);
+          const t1Key = resolveTeamKey(
+            match.t1 || (match.label || "").split(/\s+(?:vs?|v)\s+/i)[0],
+          );
+          const t2Key = resolveTeamKey(
+            match.t2 || (match.label || "").split(/\s+(?:vs?|v)\s+/i)[1],
+          );
+          const s1 = getScoreString(t1Key, pillScores, scores, match);
+          const s2 = getScoreString(t2Key, pillScores, scores, match);
+
+          const e1 = document.getElementById("sp-score-t1");
+          const e2 = document.getElementById("sp-score-t2");
+          if (e1 && e1.textContent !== s1) e1.textContent = s1;
+          if (e2 && e2.textContent !== s2) e2.textContent = s2;
+
+          const badge = document.getElementById("sp-badge");
+          if (badge) {
+            const isLive = match.locked && !match.finalized;
+            const isDone = !!match.finalized;
+            const text = isLive ? "● LIVE" : isDone ? "FINAL" : "OPEN";
+            const cls = isLive
+              ? "sp-badge-live"
+              : isDone
+                ? "sp-badge-done"
+                : "sp-badge-open";
+            if (badge.textContent !== text) {
+              badge.textContent = text;
+              badge.className = `sp-badge ${cls}`;
+            }
+          }
+        }
+
+        // 2. Surgical Update for Leaderboard
+        const search = new URLSearchParams(location.search);
+        const t = search.get("tab") || "team";
+        const at = search.get("atab") || "match";
+        const isLiveTab =
+          (session.name && t === "live") ||
+          (session.isAdmin && !session.name && at === "scoreboard");
+
+        if (isLiveTab && _liveView === "leaderboard") {
+          const stats = match.stats || {};
+          const teams = match.teams || {};
+          const mPlayers = match.players || matchPlayers;
+          const members = Object.keys(allMembers);
+
+          const ranked = members
+            .map((name) => {
+              const team = teams[name] || {};
+              return {
+                name,
+                total: memberMatchTotal(team, stats, mPlayers),
+              };
+            })
+            .sort((a, b) => b.total - a.total);
+
+          const cards = [...document.querySelectorAll(".lb-card")];
+          if (cards.length !== ranked.length) return false;
+
+          let orderChanged = false;
+          for (let i = 0; i < ranked.length; i++) {
+            const rowId = `lb-row-${ranked[i].name.replace(/\s+/g, "_")}`;
+            if (cards[i].id !== rowId) {
+              orderChanged = true;
+              break;
+            }
+          }
+          if (orderChanged) return false;
+
+          ranked.forEach((r) => {
+            const rowId = `lb-row-${r.name.replace(/\s+/g, "_")}`;
+            const scoreEl = document.getElementById(`${rowId}-score`);
+            if (scoreEl) {
+              const bstBadge =
+                scoreEl.querySelector(".bst-reveal-badge")?.outerHTML || "";
+              const currentHtml = `${r.total}${bstBadge}<span>pts</span>`;
+              if (scoreEl.innerHTML !== currentHtml) {
+                scoreEl.innerHTML = currentHtml;
+                // Trigger points flash animation surgically
+                scoreEl.style.animation = "none";
+                void scoreEl.offsetHeight; // intentional reflow to restart animation on single element
+                scoreEl.style.animation = "ptsFlash 1.5s ease both";
+              }
+            }
+
+            const team = teams[r.name] || {};
+            const booster = team.booster || null;
+            (team.players || []).forEach((p) => {
+              const chipPtsEl = document.getElementById(
+                `lb-chip-${r.name.replace(/\s+/g, "_")}-${p.replace(/\s+/g, "_")}-pts`,
+              );
+              if (chipPtsEl) {
+                const pObj = mPlayers.find((x) => x.name === p);
+                const pTeamKey = pObj ? resolveTeamKey(pObj.team) : "";
+                let pts = calcPoints(stats[p]);
+                const isC = p === team.captain,
+                  isV = p === team.vc;
+                if (isC) pts *= 2;
+                else if (isV) pts *= 1.5;
+                if (booster?.type === "team" && pTeamKey === booster.target)
+                  pts *= 2;
+                const rounded = Math.round(pts).toString();
+                if (chipPtsEl.textContent !== rounded)
+                  chipPtsEl.textContent = rounded;
+              }
+            });
+          });
+          return true;
+        }
+        return false;
+      }
+
       function _doRefresh() {
         _refreshTimer = null;
         _startTickerIfNeeded();
+
+        // Try surgical update first — if it succeeds, skip full innerHTML rebuild
+        if (trySurgicalUpdate()) return;
+
         const sy = window.scrollY;
         // Refresh score pill — wrapper always exists in nav so we update innerHTML, not outerHTML
         const _spWrap = document.getElementById("scorePillWrap");
@@ -3129,8 +3254,9 @@
           hasBst && match.locked
             ? `<span class="bst-live-pill bst-reveal-badge bst-reveal-${booster.type === "team" ? "team" : booster.type === "triple" ? "triple" : "double"}">⚡ ${BST_LABELS[booster.type]}${booster.type === "team" && booster.target ? " · " + booster.target : ""}</span>`
             : "";
+        const rowId = `lb-row-${r.name.replace(/\s+/g, "_")}`;
         return `
-    <div class="lb-card ${r.name === highlightName ? "lb-me" : ""} ${rankClass} ${bstCardClass}" style="${delay}">
+    <div class="lb-card ${r.name === highlightName ? "lb-me" : ""} ${rankClass} ${bstCardClass}" id="${rowId}" style="${delay}">
       <div class="lb-med ${medalClass}">${medals[i] || "#" + (i + 1)}</div>
       <div class="lb-body">
         <div class="lb-name-row">
@@ -3164,13 +3290,14 @@
                   pTeamKey,
                   match.locked,
                 );
-                return `<span class="lchip ${isC ? "lchip-c" : isV ? "lchip-vc" : ""}">${isC ? '<span class="lchip-badge">C</span>' : isV ? '<span class="lchip-badge lchip-badge-v">VC</span>' : ""}${isOverseas(p) ? '<span class="lchip-flag">✈</span>' : ""}${fmtName(p)}${_no}${bstBadge} <em>${Math.round(pts)}</em></span>`;
+                const chipId = `lb-chip-${r.name.replace(/\s+/g, "_")}-${p.replace(/\s+/g, "_")}`;
+                return `<span class="lchip ${isC ? "lchip-c" : isV ? "lchip-vc" : ""}" id="${chipId}">${isC ? '<span class="lchip-badge">C</span>' : isV ? '<span class="lchip-badge lchip-badge-v">VC</span>' : ""}${isOverseas(p) ? '<span class="lchip-flag">✈</span>' : ""}${fmtName(p)}${_no}${bstBadge} <em id="${chipId}-pts">${Math.round(pts)}</em></span>`;
               })
               .join("") || '<span class="muted-s">No team submitted</span>'
           }
         </div>
       </div>
-      <div class="lb-score" style="${flashClass}">${r.total}${scoreBadge}<span>pts</span></div>
+      <div class="lb-score" id="${rowId}-score" style="${flashClass}">${r.total}${scoreBadge}<span>pts</span></div>
     </div>`;
       })
       .join("")}
@@ -10182,6 +10309,18 @@
         return `<div class="ticker-wrap"><div class="ticker">${items}${items}</div></div>`;
       }
 
+      function getScoreString(teamKey, pillScores, scores, match) {
+        const row = pillScores[teamKey];
+        if (!row && scores.length === 1 && teamKey) {
+          const only = scores[0];
+          const innKey = resolveInningKey(only.inning, match);
+          if (innKey === teamKey)
+            return `${only.r || 0}/${only.w || 0} (${parseFloat(only.o || 0).toFixed(1)})`;
+        }
+        if (!row) return "";
+        return `${row.r || 0}/${row.w || 0} (${parseFloat(row.o || 0).toFixed(1)})`;
+      }
+
       function renderScorePill() {
         const mid = getActiveMid();
         const match = getMatch(mid);
@@ -10217,36 +10356,24 @@
           (match.label || "").split(/\s+(?:vs?|v)\s+/i)[1]?.trim().split(" ").pop() ||
           "T2";
 
-        function scoreStr(teamKey) {
-          const row = pillScores[teamKey];
-          // Fallback: If only one inning is in progress, show it for the batting team
-          if (!row && scores.length === 1 && teamKey) {
-            const only = scores[0];
-            const innKey = resolveInningKey(only.inning, match);
-            if (innKey === teamKey) return `${only.r || 0}/${only.w || 0} (${parseFloat(only.o || 0).toFixed(1)})`;
-          }
-          if (!row) return "";
-          return `${row.r || 0}/${row.w || 0} (${parseFloat(row.o || 0).toFixed(1)})`;
-        }
-
-        const s1 = scoreStr(t1Key);
-        const s2 = scoreStr(t2Key);
+        const s1 = getScoreString(t1Key, pillScores, scores, match);
+        const s2 = getScoreString(t2Key, pillScores, scores, match);
         const shortLabel = match.label ? match.label.split(",")[0] : "";
 
         return `<div class="score-pill" id="scorePill">
   <div class="sp-team">
     ${t1Img ? `<img loading="lazy" decoding="async" src="${t1Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${t1Name}</span>
-    ${s1 ? `<span class="sp-score">${s1}</span>` : ""}
+    <span class="sp-score" id="sp-score-t1">${s1 || ""}</span>
   </div>
   <span class="sp-vs">vs</span>
   <div class="sp-team">
     ${t2Img ? `<img loading="lazy" decoding="async" src="${t2Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${t2Name}</span>
-    ${s2 ? `<span class="sp-score">${s2}</span>` : ""}
+    <span class="sp-score" id="sp-score-t2">${s2 || ""}</span>
   </div>
-  <span class="sp-label">${shortLabel}</span>
-  <span class="sp-badge ${badgeClass}">${badgeText}</span>
+  <span class="sp-label" id="sp-label">${shortLabel}</span>
+  <span class="sp-badge ${badgeClass}" id="sp-badge">${badgeText}</span>
 </div>`;
       }
 
