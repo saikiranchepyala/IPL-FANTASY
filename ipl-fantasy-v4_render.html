@@ -1205,7 +1205,12 @@
           window._unsubGame = onSnapshot(
             doc(db, "meta", "game"),
             (snap) => {
-              metaGame = snap.data() || {};
+              const data = snap.data() || {};
+              const stringified = JSON.stringify(data);
+              if (window._lastGameRaw === stringified) return;
+              window._lastGameRaw = stringified;
+
+              metaGame = data;
               const primary = metaGame.currentMatchId || "";
               const ids = [
                 ...new Set(
@@ -1265,7 +1270,12 @@
           window._unsubSeason = onSnapshot(
             doc(db, "season", "totals"),
             (snap) => {
-              seasonTotals = snap.data() || {};
+              const data = snap.data() || {};
+              const stringified = JSON.stringify(data);
+              if (window._lastSeasonRaw === stringified) return;
+              window._lastSeasonRaw = stringified;
+
+              seasonTotals = data;
               if (skipNextRefresh) return;
               if (session.name || session.isAdmin) refreshView();
             },
@@ -1311,11 +1321,17 @@
             if (!snap.exists()) return;
             const data = snap.data() || {};
             const wasRevealed = activeMatches[mid]?.match?.revealed;
+            
+            // Short-circuit: If data hasn't changed, don't trigger re-render
+            const stringified = JSON.stringify(data);
+            if (activeMatches[mid]?.raw === stringified) return;
+
             activeMatches[mid] = {
               match: data,
               players: data.players || [],
               stats: data.stats || {},
               teams: data.teams || {},
+              raw: stringified,
             };
             // Restore localTeam after page refresh (session restored from localStorage)
             if (
@@ -1451,9 +1467,7 @@
             adminContent.innerHTML = body;
             // Force layout flush for touch hit-box rebuild — skip on pointer devices
             // where it only causes a synchronous reflow with no benefit
-            if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
-              void adminContent.offsetHeight;
-            }
+            /* void adminContent.offsetHeight; removed for mobile perf */
             bindAdmin(true); // synchronous — buttons bound before next user tap
             requestAnimationFrame(() => {
               if (
@@ -4109,7 +4123,7 @@
           matchId,
           "switchAdminTab('history')",
         );
-        void tabContent.offsetHeight;
+        /* void tabContent.offsetHeight; removed for mobile perf */
         bindAdmin(true); // synchronous
       };
 
@@ -5159,7 +5173,7 @@
           if (t === "history")    body = renderHistoryTab();
           if (t === "scoreboard") body = renderLiveScoreboardTab();
           adminContent.innerHTML = body;
-          void adminContent.offsetHeight; // force layout flush → touch map rebuild
+          /* void adminContent.offsetHeight; removed for mobile perf */
           bindAdmin(true); // synchronous — buttons bound before next user tap
         } else {
           refreshView();
@@ -5209,9 +5223,7 @@
           if (t === "scoreboard")  body = renderLiveScoreboardTab();
           adminContent.innerHTML = body;
 
-          // Synchronous reflow — forces Chrome to commit layout and rebuild the
-          // compositor touch hit-box map before returning to the event loop.
-          void adminContent.offsetHeight;
+          /* void adminContent.offsetHeight; removed for mobile perf */
 
           // Reset only the admin content scroll, NOT the global window scroll.
           // window.scrollTo would jump the whole page; scrollTop resets only the
