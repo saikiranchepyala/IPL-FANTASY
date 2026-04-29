@@ -21,7 +21,9 @@
       href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:ital,wght@0,400;0,500;0,600;0,700;0,800;1,700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js" integrity="sha384-Rv68Y7adOjMMJc1/xFMcdNvXre/HF51to4GZjBALmXr7ABnVl5V4UajJwBu7zbhN" crossorigin="anonymous"></script>
+    <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" />
+    <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" />
+    <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" />
     <script type="module">
       // ═══════════════════════════════════════════════
       //  ONLY EDIT THIS — paste your Firebase config
@@ -844,7 +846,7 @@
                 onclick="window.bstSelectTarget('${k}')"
                 style="border-color:${isSel ? c.primary || "#a78bfa" : "rgba(255,255,255,.12)"};
                        background:${isSel ? (c.primary || "#a78bfa") + "22" : "rgba(255,255,255,.04)"}">
-                ${logo ? `<img src="${logo}" class="bst-tc-logo" alt="${k}">` : `<div class="bst-tc-abbr">${k}</div>`}
+                ${logo ? `<img loading="lazy" decoding="async" src="${logo}" class="bst-tc-logo" alt="${k}">` : `<div class="bst-tc-abbr">${k}</div>`}
                 <div class="bst-tc-name" style="color:${isSel ? c.primary || "#a78bfa" : "var(--fg)"}">${k}</div>
                 <div class="bst-tc-count">${myCount} player${myCount !== 1 ? "s" : ""} in your XI</div>
               </button>`;
@@ -1920,8 +1922,8 @@
             : "";
           return `<button class="mst-tab ${isSelected ? "mst-active" : ""}" onclick="selectMemberMatch('${mid}')" style="${_mStyle}">
           <div class="mst-flags">
-            ${m.t1img ? `<img src="${m.t1img}" class="mst-flag">` : ""}
-            ${m.t2img ? `<img src="${m.t2img}" class="mst-flag">` : ""}
+            ${m.t1img ? `<img loading="lazy" decoding="async" src="${m.t1img}" class="mst-flag">` : ""}
+            ${m.t2img ? `<img loading="lazy" decoding="async" src="${m.t2img}" class="mst-flag">` : ""}
           </div>
           <span class="mst-name">${shortName(m.label || mid)}</span>
           <span class="mst-status ${statusClass}">${status}</span>
@@ -2132,8 +2134,8 @@
     </div>
     <div class="match-bar-content">
       <div class="match-flags">
-        ${viewMatch.t1img ? `<img src="${viewMatch.t1img}" class="match-flag">` : ""}
-        ${viewMatch.t2img ? `<img src="${viewMatch.t2img}" class="match-flag">` : ""}
+        ${viewMatch.t1img ? `<img loading="lazy" decoding="async" src="${viewMatch.t1img}" class="match-flag">` : ""}
+        ${viewMatch.t2img ? `<img loading="lazy" decoding="async" src="${viewMatch.t2img}" class="match-flag">` : ""}
       </div>
       <div class="match-title">${viewMatch.label || "–"}</div>
       ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
@@ -2346,7 +2348,7 @@
           const bstBadge = bstChipForPlayer(booster, p.name, pTeamKey, true);
           return `<div class="mtc-row ${p.isC ? "mtc-c" : p.isV ? "mtc-v" : ""}">
       <div class="mtc-role">${ri[p.role] || ""}</div>
-      <img src="https://h.cricapi.com/img/players/${encodeURIComponent(p.id || PLAYER_CACHE[p.name] || 'default')}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
+      <img loading="lazy" decoding="async" src="https://h.cricapi.com/img/players/${encodeURIComponent(p.id || PLAYER_CACHE[p.name] || 'default')}.jpg" class="pthumb" style="width:24px;height:24px" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+'">
       <div class="mtc-info">
         <div class="mtc-name">
           ${badgeClass ? `<span class="badge-status ${badgeClass}">${badgeLabel}</span>` : ""}
@@ -2954,7 +2956,7 @@
             <div class="hsc-inn lsv-inn" style="--inn-col:${col}">
               <div class="hsc-inn-hd">
                 <div class="hsc-inn-left">
-                  ${img?`<img src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
+                  ${img?`<img loading="lazy" decoding="async" src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
                   <span class="hsc-inn-team">${label}</span>
                   ${isCurrentInn?'<span class="lsv-live-badge">LIVE</span>':""}
                 </div>
@@ -3056,8 +3058,8 @@
           : `
   <div class="reveal-banner" style="border-top-color:${_lbtc.primary}; background:linear-gradient(${_lbtc.gradient}), var(--glass);">
     <div class="rb-flags">
-      ${match.t1img ? `<img src="${match.t1img}" class="rb-flag">` : ""}
-      ${match.t2img ? `<img src="${match.t2img}" class="rb-flag">` : ""}
+      ${match.t1img ? `<img loading="lazy" decoding="async" src="${match.t1img}" class="rb-flag">` : ""}
+      ${match.t2img ? `<img loading="lazy" decoding="async" src="${match.t2img}" class="rb-flag">` : ""}
     </div>
     <div class="rb-eye">🏏 ${match.locked ? "LIVE SCORES" : "TEAMS REVEALED"}</div>
     <div class="rb-title">${match.label || "Match"}</div>
@@ -3621,8 +3623,8 @@
                     : `openMatchSummary('${m.matchId}')`;
                 return `<div class="hlist-card" onclick="${_fn}">
                 <div class="hlc-logos">
-                  ${t1img ? `<img src="${t1img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
-                  ${t2img ? `<img src="${t2img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
+                  ${t1img ? `<img loading="lazy" decoding="async" src="${t1img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
+                  ${t2img ? `<img loading="lazy" decoding="async" src="${t2img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
                 </div>
                 <div class="hlc-info">
                   <div class="hlc-label">${shortLabel}</div>
@@ -3871,7 +3873,7 @@
             <div class="hsc-inn" style="--inn-col:${col}">
               <div class="hsc-inn-hd">
                 <div class="hsc-inn-left">
-                  ${img ? `<img src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
+                  ${img ? `<img loading="lazy" decoding="async" src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
                   <span class="hsc-inn-team">${label}</span>
                 </div>
                 ${
@@ -4026,9 +4028,9 @@
             <button class="msv-back" onclick="${backFn}">← Back</button>
             <div class="hsc-match-hd">
               <div class="hsc-match-teams">
-                ${t1img ? `<img src="${t1img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
+                ${t1img ? `<img loading="lazy" decoding="async" src="${t1img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
                 <span class="hsc-match-vs">vs</span>
-                ${t2img ? `<img src="${t2img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
+                ${t2img ? `<img loading="lazy" decoding="async" src="${t2img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
               </div>
               <div class="hsc-match-label">${(match.label || "Match Scorecard").split(",")[0]}</div>
               ${match.label?.includes(",") ? `<div class="hsc-match-sub">${match.label.split(",").slice(1).join(",").trim()}</div>` : ""}
@@ -4575,7 +4577,7 @@
                 ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:900;letter-spacing:2px;color:${_ptc2.primary};opacity:0.28;pointer-events:none;z-index:1;line-height:1;">${_pTeamKey}</div>`
                 : "";
             const _imgEl = _pTeamImg
-              ? `<img src="${_pTeamImg}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:0.18;filter:saturate(1.2) brightness(1.4) contrast(1.1);mix-blend-mode:screen;pointer-events:none;z-index:2;" onerror="this.style.display='none'">`
+              ? `<img loading="lazy" decoding="async" src="${_pTeamImg}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;opacity:0.18;filter:saturate(1.2) brightness(1.4) contrast(1.1);mix-blend-mode:screen;pointer-events:none;z-index:2;" onerror="this.style.display='none'">`
               : "";
             const _logo = _badge + _imgEl;
             const _pcStyle = _ptc2
@@ -4593,7 +4595,7 @@
           const pid = p.id || PLAYER_CACHE[p.name];
           const src = pid ? `https://h.cricapi.com/img/players/${encodeURIComponent(pid)}.jpg` : "";
           const placeholder = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjIpIj48cGF0aCBkPSJNMTIgMmMtMi43NiAwLTUgMi4yNC01IDVzMi4yNCA1IDUgNS0yLjI0LTUtNSA1eiBNMTIgMTRjLTQuNDEgMC04IDIuMjQtOCA1djFoMTZ2LTFjMC0yLjc2LTMuNTktNS04LTV6Ii8+PC9zdmc+";
-          return `<img src="${src}" class="pthumb" onerror="this.onerror=null; this.src='${placeholder}'" style="${!src ? 'display:none' : ''}">` + (!src ? `<div class="pthumb" style="display:flex;align-items:center;justify-content:center;background:var(--s2)"><img src="${placeholder}" style="width:20px;opacity:0.5"></div>` : '');
+          return `<img loading="lazy" decoding="async" src="${src}" class="pthumb" onerror="this.onerror=null; this.src='${placeholder}'" style="${!src ? 'display:none' : ''}">` + (!src ? `<div class="pthumb" style="display:flex;align-items:center;justify-content:center;background:var(--s2)"><img loading="lazy" decoding="async" src="${placeholder}" style="width:20px;opacity:0.5"></div>` : '');
         })()}
         <div class="pc-name">${escHtml(p.name)}</div>
       </div>
@@ -5110,8 +5112,8 @@
           if (!label) return "";
           return `<button class="mst-tab ${isSelected ? "mst-active" : ""}" onclick="selectMatchTab('${mid}')">
           <div class="mst-flags">
-            ${m.t1img ? `<img src="${m.t1img}" class="mst-flag">` : ""}
-            ${m.t2img ? `<img src="${m.t2img}" class="mst-flag">` : ""}
+            ${m.t1img ? `<img loading="lazy" decoding="async" src="${m.t1img}" class="mst-flag">` : ""}
+            ${m.t2img ? `<img loading="lazy" decoding="async" src="${m.t2img}" class="mst-flag">` : ""}
           </div>
           <span class="mst-name">${shortName(label)}</span>
           <span class="mst-status ${statusClass}">${status}</span>
@@ -5280,8 +5282,8 @@
           </div>
           <div class="match-bar-content">
             <div class="match-flags">
-              ${viewMatch.t1img ? `<img src="${escAttr(viewMatch.t1img)}" class="match-flag">` : ""}
-              ${viewMatch.t2img ? `<img src="${escAttr(viewMatch.t2img)}" class="match-flag">` : ""}
+              ${viewMatch.t1img ? `<img loading="lazy" decoding="async" src="${escAttr(viewMatch.t1img)}" class="match-flag">` : ""}
+              ${viewMatch.t2img ? `<img loading="lazy" decoding="async" src="${escAttr(viewMatch.t2img)}" class="match-flag">` : ""}
             </div>
             <div class="match-title">${escHtml(viewMatch.label || "–")}</div>
             ${viewMatch.venue ? `<div class="match-venue">🏟️ ${escHtml(viewMatch.venue)}</div>` : ""}
@@ -10221,13 +10223,13 @@
 
         return `<div class="score-pill" id="scorePill">
   <div class="sp-team">
-    ${t1Img ? `<img src="${t1Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
+    ${t1Img ? `<img loading="lazy" decoding="async" src="${t1Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${t1Name}</span>
     ${s1 ? `<span class="sp-score">${s1}</span>` : ""}
   </div>
   <span class="sp-vs">vs</span>
   <div class="sp-team">
-    ${t2Img ? `<img src="${t2Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
+    ${t2Img ? `<img loading="lazy" decoding="async" src="${t2Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${t2Name}</span>
     ${s2 ? `<span class="sp-score">${s2}</span>` : ""}
   </div>
@@ -10387,7 +10389,7 @@
               contain-intrinsic-size: 0 400px;
             }
             .acard, .pcard, .lb-card, .modal, .msv, .aura-blob {
-              will-change: transform;
+              /* will-change: transform removed for mobile perf */
             }
             /* Prevent iOS long-press callout + accidental text selection on game cards */
             .pcard, .lb-card, .acard, .sc-row, .mrow, .pool-chip, .stat-card, .mtc-row {
@@ -10817,7 +10819,7 @@
               box-shadow: 0 0 20px rgba(59,130,246,.12), 0 8px 32px 0 rgba(0, 0, 0, 0.5);
               overflow: hidden;
               min-height: 42px;
-              will-change: transform;
+              /* will-change: transform removed for mobile perf */
             }
             .score-pill::before {
               content: '';
@@ -13054,7 +13056,7 @@
               align-items: flex-start;
               gap: 14px;
               transition: border-color .15s, transform .15s, box-shadow .15s;
-              will-change: transform;
+              /* will-change: transform removed for mobile perf */
               animation: cardSlideUp 0.22s ease-out both;
               box-shadow: 0 0 0 1px rgba(59,130,246,.1), 0 4px 24px rgba(0,0,0,.5);
             }
@@ -14056,7 +14058,7 @@
                 0 8px 32px rgba(0,0,0,.7),
                 inset 0 1px 0 rgba(255,255,255,.1);
               transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
-              will-change: transform;
+              /* will-change: transform removed for mobile perf */
             }
             .acard::after {
               content: '';
@@ -16314,25 +16316,25 @@
                 background-attachment: scroll !important;
                 background-image: none !important;
               }
-              body::after { animation: none !important; }
-              .hero-banner::before { animation: none !important; }
-              .hero-banner::after { animation: none !important; }
-              .acard::after { animation: none !important; }
-              /* Aura blobs: kill animation + demote from GPU compositor layer on mobile.
-                 Animated will-change:transform blobs cause a compositor-sync flash every
-                 time adminTabContent.innerHTML is updated on Pixel Chrome. */
+              body::after, .hero-banner::before, .hero-banner::after, .acard::after,
+              .aura-blob, .lb-card::before, .bst-chip, .lsv-pulse, .shimmer { 
+                animation: none !important; 
+              }
+              
+              /* Aura blobs: demote from GPU compositor layer */
               .aura-blob {
-                animation: none !important;
                 will-change: auto !important;
                 filter: none !important;
-                opacity: 0.2 !important;
-                transition: none !important;
+                opacity: 0.15 !important;
+                display: none !important; /* Save more perf on mobile */
               }
 
-              /* 2. Selective backdrop-filter — iOS has a hard cap of ~5-10 layers. */
-              *:not(.score-pill):not(.scorePillWrap):not(.cricket-score-bar):not(.match-bar):not(.history-modal) {
+              /* 2. Strip backdrop-filter — iOS performance bottleneck #1.
+                 Keep it ONLY on the score pill for aesthetics, strip everywhere else. */
+              .acard, .lb-card, .mst-tab, .bst-dock, .history-modal, .pst-sheet, .modal, .view-tabs, .nav {
                 backdrop-filter: none !important;
                 -webkit-backdrop-filter: none !important;
+                background: rgba(20, 20, 25, 0.96) !important; /* solid fallback */
               }
 
               /* 3. Keep essential feedback animations only */
