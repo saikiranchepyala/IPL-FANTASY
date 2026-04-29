@@ -51,6 +51,7 @@
         collection,
         getDocs,
         writeBatch,
+        runTransaction,
         serverTimestamp,
       } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
       import {
@@ -1071,12 +1072,24 @@
         if (!_trackApiCall())
           throw new Error("CricAPI daily quota exhausted (2000 calls)");
 
+        // ── Architectural Hardening: API Key Proxy ──
+        // If metaGame.useProxy is enabled, route through Netlify Function
+        let finalUrl = url;
+        if (metaGame.useProxy && url.includes("api.cricapi.com")) {
+          try {
+            const parsed = new URL(url);
+            parsed.searchParams.delete("apikey");
+            // Maps e.g. https://api.cricapi.com/v1/match_info -> /.netlify/functions/cricapi-proxy/match_info
+            finalUrl = "/.netlify/functions/cricapi-proxy" + parsed.pathname.replace("/v1", "") + parsed.search;
+          } catch (e) { console.warn("Proxy URL build failed:", e); }
+        }
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
 
         try {
-          console.log(`[Fetch] ${url.split('apikey=')[0]}...`);
-          const res = await fetch(url, {
+          console.log(`[Fetch] ${finalUrl.split('apikey=')[0]}...`);
+          const res = await fetch(finalUrl, {
             ...opts,
             headers: { 'Accept': 'application/json', ...opts.headers },
             signal: controller.signal
@@ -1102,9 +1115,8 @@
       let _pvMatchCache = {}; // matchId → match data for member pitch overlay
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
       let _matchType = "ipl"; // 'ipl' | 'international' | 'domestic'
-      let _autoFetchRunning = false; // re-entrancy guard for autoFetchStats
-      let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls
-      let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
+      const _autoFetchRunning = new Set(); // re-entrancy guard for autoFetchStats (match-scoped)
+      let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls      let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
 
       // ── Session persistence ──
       function sessionSave() {
@@ -1855,7 +1867,16 @@
             return false;
           }
           console.warn("[Auth] Legacy plaintext PIN accepted — auto-upgrading to PBKDF2 hash");
-          if (upgradeCallback) upgradeCallback(hashed).catch(e => console.warn("PIN upgrade failed:", e));
+          if (upgradeCallback) {
+            try {
+              await upgradeCallback(hashed);
+            } catch (e) {
+              console.warn("[Auth] PIN upgrade failed — refusing login to prevent future lockout", e);
+              const err = document.getElementById("memberErr") || document.getElementById("joinErr");
+              if (err) err.textContent = "Security upgrade failed — check your connection and try again.";
+              return false;
+            }
+          }
           return true;
         }
         return false;
@@ -5565,10 +5586,15 @@
           <div class="step-num">1</div>
           <div class="step-body">
             <div class="step-label">API Key <a class="alink" href="https://cricketdata.org" target="_blank">get free →</a></div>
-            <div style="display:flex;gap:8px">
+            <div style="display:flex;gap:8px;margin-bottom:8px">
               <input id="cricKey" type="text" class="sinp" style="margin:0;flex:1" value="${escAttr(metaGame.cricApiKey || "")}" placeholder="Paste your CricketData.org key">
               <button class="btn-sm" onclick="adminSaveApiKey()" style="flex-shrink:0">Save</button>
             </div>
+            <div class="field-check" style="margin-left:0;padding:0">
+              <input type="checkbox" id="useProxy" ${metaGame.useProxy ? "checked" : ""}>
+              <label for="useProxy" style="font-size:11px;color:var(--text2)">Use Server Proxy (Netlify Functions)</label>
+            </div>
+            <p class="muted-s" style="margin-top:4px;line-height:1.3">Hides your API key from visitors. Requires <code>cricapi-proxy</code> Netlify Function deployment.</p>
           </div>
         </div>
 
@@ -7156,7 +7182,17 @@
         liveMatchId = "",
       ) {
         const mid = "match_" + Date.now();
-        const matchNum = (await getDocs(collection(db, "matches"))).size + 1;
+        
+        // Atomic Match Number Generation
+        const matchNum = await runTransaction(db, async (transaction) => {
+          const gameRef = doc(db, "meta", "game");
+          const gameSnap = await transaction.get(gameRef);
+          const nextNum = (gameSnap.data()?.matchCounter || 0) + 1;
+          
+          transaction.update(gameRef, { matchCounter: nextNum });
+          return nextNum;
+        });
+
         await setDoc(doc(db, "matches", mid), {
           label,
           t1,
@@ -8629,8 +8665,9 @@
         try {
           await updateDoc(doc(db, "meta", "game"), {
             cricApiKey: document.getElementById("cricKey").value.trim(),
+            useProxy: document.getElementById("useProxy")?.checked || false,
           });
-          toast("API key saved");
+          toast("API configuration saved");
         } catch (e) {
           toast("Save failed: " + e.message, "err");
         }
@@ -8709,10 +8746,9 @@
 
       window.adminGenCode = async function () {
         try {
-          const c =
-            Math.random().toString(36).substring(2, 5).toUpperCase() +
-            Math.random().toString(36).substring(2, 5).toUpperCase();
-          await updateDoc(doc(db, "meta", "game"), { joinCode: c });
+          const array = new Uint8Array(6);
+          crypto.getRandomValues(array);
+          const c = Array.from(array, b => (b % 36).toString(36).toUpperCase()).join("");          await updateDoc(doc(db, "meta", "game"), { joinCode: c });
           toast("Join link created!");
         } catch (e) {
           toast("Error: " + e.message, "err");
@@ -8722,10 +8758,9 @@
       window.adminRegenCode = async function () {
         if (!confirm("New code? Old link stops working.")) return;
         try {
-          const c =
-            Math.random().toString(36).substring(2, 5).toUpperCase() +
-            Math.random().toString(36).substring(2, 5).toUpperCase();
-          await updateDoc(doc(db, "meta", "game"), { joinCode: c });
+          const array = new Uint8Array(6);
+          crypto.getRandomValues(array);
+          const c = Array.from(array, b => (b % 36).toString(36).toUpperCase()).join("");          await updateDoc(doc(db, "meta", "game"), { joinCode: c });
           toast("New code generated");
         } catch (e) {
           toast("Error: " + e.message, "err");
@@ -9187,59 +9222,27 @@
       };
 
       // --- DEBUG HELPER ---
-      window.forceDebugScorecard = function () {
-        const mockMatch = {
-          label: "SRH vs RR (DEBUG MODE)",
-          t1: "SRH",
-          t2: "RR",
-          locked: true,
-          revealed: true,
-          matchStatus: "SRH need 45 runs in 18 balls",
-          score: [
-            { r: 210, w: 4, o: 20, inning: "Rajasthan Royals Inning 1" },
-            { r: 166, w: 3, o: 17, inning: "Sunrisers Hyderabad Inning 1" },
-          ],
-          overSummaries: [
-            { o: 15, r: 12, w: 0, o_detail: "1 4 0 6 1 0" },
-            { o: 16, r: 8, w: 1, o_detail: "1 1 W 4 1 1" },
-            { o: 17, r: 15, w: 0, o_detail: "6 0 4 1 0 4" },
-          ],
-          currentBatsmen: [
-            { name: "Heinrich Klaasen", r: 45, b: 18, strike: true },
-            { name: "Abdul Samad", r: 12, b: 6, strike: false },
-          ],
-          currentBowler: { name: "Yuzvendra Chahal", w: 2, r: 34, o: 3.4 },
-        };
-        const container =
-          document.querySelector(".acol .acard") || document.body;
-        const debugDiv = document.createElement("div");
-        debugDiv.style.padding = "20px";
-        debugDiv.style.background = "var(--s1)";
-        debugDiv.style.border = "2px dashed var(--gold)";
-        debugDiv.style.marginTop = "20px";
-        debugDiv.innerHTML = `<h3>DEBUG PREVIEW</h3>${renderScoreBar(mockMatch)}`;
-        container.prepend(debugDiv);
-        toast("Debug Scorecard Rendered", "success");
-      };
+      /* window.forceDebugScorecard removed for production */
 
       async function autoFetchStats(showFeedback = false) {
-        if (_autoFetchRunning) {
-          // Silently skip overlapping calls — previous fetch still in flight.
-          // This prevents AR interval + XI watcher from interleaving writes to playerStats.
-          console.log("[autoFetchStats] Skipping — previous fetch still in flight");
+        const activeMid = getActiveMid();
+        if (!activeMid) {
+          if (showFeedback) toast("No active match selected", "err");
           return;
         }
-        _autoFetchRunning = true;
+
+        if (_autoFetchRunning.has(activeMid)) {
+          // Silently skip overlapping calls — previous fetch for THIS match still in flight.
+          console.log(`[autoFetchStats] Skipping ${activeMid} — fetch in flight`);
+          return;
+        }
+
+        _autoFetchRunning.add(activeMid);
         try {
         // ── main body wrapped so finally always clears the flag ──
         const key = metaGame.cricApiKey;
         if (!key) {
           if (showFeedback) toast("CricAPI key not configured — set it in League Settings", "err");
-          return;
-        }
-        const activeMid = getActiveMid();
-        if (!activeMid) {
-          if (showFeedback) toast("No active match selected", "err");
           return;
         }
         const activeMatchData = getMatch(activeMid);
@@ -10031,7 +10034,7 @@
         }
         // ── end of main body ──
         } finally {
-          _autoFetchRunning = false;
+          _autoFetchRunning.delete(activeMid);
         }
       }
 
@@ -10431,6 +10434,7 @@
       }
 
       function ln(n) {
+        if (!n) return "";
         return n.split(" ").pop();
       }
       function fmtName(n) {
@@ -10456,8 +10460,7 @@
         const step = (timestamp) => {
           if (!startTimestamp) startTimestamp = timestamp;
           const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-          obj.innerHTML = Math.floor(easeOut(progress) * (end - start) + start);
-          if (progress < 1) {
+          obj.textContent = Math.floor(easeOut(progress) * (end - start) + start);          if (progress < 1) {
             window.requestAnimationFrame(step);
           }
         };
