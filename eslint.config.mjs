@@ -21,7 +21,6 @@ export default [
         onSnapshot: "readonly",
         collection: "readonly",
         getDocs: "readonly",
-        writeBatch: "readonly",
         runTransaction: "readonly",
         serverTimestamp: "readonly",
         // Project globals (attached to window or local module scope)

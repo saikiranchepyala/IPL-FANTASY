@@ -50,7 +50,6 @@
         onSnapshot,
         collection,
         getDocs,
-        writeBatch,
         runTransaction,
         serverTimestamp,
       } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -67,6 +66,14 @@
       window.calcPoints = (s) => (typeof calcPoints === "function" ? calcPoints(s) : 0);
       window.toRealOvers = (o) => (typeof toRealOvers === "function" ? toRealOvers(o) : 0);
       window.resolveTeamKey = (t) => (typeof resolveTeamKey === "function" ? resolveTeamKey(t) : "");
+
+      // ── Global Error Handlers ──
+      window.addEventListener('error', (e) => {
+        console.error("[Global Error]:", e.error || e.message);
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        console.error("[Unhandled Promise Rejection]:", e.reason);
+      });
 
       // ─────────────────────────────────────────────
       //  DATA MODEL (Firestore structure)
@@ -263,10 +270,11 @@
 
       function toRealOvers(ov) {
         const val = parseFloat(ov) || 0;
-        if (val > 100) return 0; // Loose safety guard: No bowler bowls > 100 overs in a match
+        if (val <= 0 || val > 100) return 0; // Loose safety guard
         const full = Math.floor(val);
         const balls = Math.round((val - full) * 10);
-        return full + Math.min(balls, 6) / 6;
+        if (balls >= 6) return full + 1; // 4.6 becomes 5.0
+        return full + balls / 6;
       }
 
       // ── Points calculator ──
@@ -335,12 +343,12 @@
             const pObj = _pList.find((pl) => pl.name === p);
             if (pObj && resolveTeamKey(pObj.team) === booster.target) pts *= 2;
           }
-          return acc + pts;
+          return acc + Math.round(pts);
         }, 0);
         // Triple/Double: multiplies the fantasy MEMBER's entire match total
         if (booster?.type === "triple") total *= 3;
         else if (booster?.type === "double") total *= 2;
-        return Math.round(total);
+        return total;
       }
 
       // ── BOOSTER SYSTEM ──
@@ -615,32 +623,50 @@
 
         // Auto-save: clear the booster in Firestore + refund inventory
         try {
-          const mSnap = await getDoc(doc(db, "meta", "members"));
-          const mems = mSnap.data() || {};
-          const inv = {
-            ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
-          };
-          inv[savedBooster.type] = Math.min(
-            BST_DEFAULTS[savedBooster.type],
-            (inv[savedBooster.type] ?? 0) + 1,
-          );
+          let updatedMems = null;
+          let updatedInv = null;
 
-          const batch = writeBatch(db);
-          batch.update(doc(db, "matches", activeMid), {
-            [`teams.${session.name}.booster`]: null,
-            [`teams.${session.name}.updatedAt`]: Date.now(),
+          await runTransaction(db, async (transaction) => {
+            const mRef = doc(db, "meta", "members");
+            const matchRef = doc(db, "matches", activeMid);
+
+            const [mSnap, matchSnap] = await Promise.all([
+              transaction.get(mRef),
+              transaction.get(matchRef)
+            ]);
+
+            const mems = mSnap.data() || {};
+            const matchData = matchSnap.data() || {};
+
+            if (matchData.locked || matchData.finalized) {
+              throw new Error("Match is locked — no booster changes allowed");
+            }
+
+            const inv = {
+              ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
+            };
+            inv[savedBooster.type] = Math.min(
+              BST_DEFAULTS[savedBooster.type],
+              (inv[savedBooster.type] ?? 0) + 1,
+            );
+
+            transaction.update(matchRef, {
+              [`teams.${session.name}.booster`]: null,
+              [`teams.${session.name}.updatedAt`]: Date.now(),
+            });
+            transaction.set(mRef, {
+              [session.name]: { boosters: inv }
+            }, { merge: true });
+
+            updatedMems = mems;
+            updatedInv = inv;
           });
-          batch.set(doc(db, "meta", "members"), {
-            [session.name]: { boosters: inv }
-          }, { merge: true });
 
-          await batch.commit();
-
-          if (!mems[session.name]) mems[session.name] = {};
-          mems[session.name].boosters = inv;
+          if (!updatedMems[session.name]) updatedMems[session.name] = {};
+          updatedMems[session.name].boosters = updatedInv;
 
           // Update local state ONLY after successful DB writes
-          allMembers = mems;
+          allMembers = updatedMems;
           localTeam.booster = null; // actually clear it locally now
           if (activeMatches[activeMid]?.teams) {
             activeMatches[activeMid].teams[session.name] = {
@@ -685,13 +711,23 @@
           toast("Pick a team", "err");
           return;
         }
+        
+        const activeMid = memberSelectedMatchId || currentMatchId;
+        const match = getMatch(activeMid);
+
+        if (_bstSelectedType === "team") {
+          const t1Key = resolveTeamKey(match.t1 || (match.label || "").split(/\s+vs\s+/i)[0]);
+          const t2Key = resolveTeamKey(match.t2 || (match.label || "").split(/\s+vs\s+/i)[1]);
+          if (_bstSelectedTarget !== t1Key && _bstSelectedTarget !== t2Key) {
+            toast("Selected team is not playing in this match", "err");
+            return;
+          }
+        }
 
         const newBooster = {
           type: _bstSelectedType,
           target: _bstSelectedTarget || null,
         };
-        const activeMid = memberSelectedMatchId || currentMatchId;
-        const match = getMatch(activeMid);
 
         if (isPlayoffMatch(match)) {
           toast("Boosters are only available for the League Stage", "err");
@@ -727,38 +763,56 @@
         // AUTO-SAVE: team is already submitted — persist booster immediately.
         // This prevents the booster being lost if the member doesn't re-press Lock In.
         try {
-          const mSnap = await getDoc(doc(db, "meta", "members"));
-          const mems = mSnap.data() || {};
-          const inv = {
-            ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
-          };
-          if (savedBooster?.type) {
-            inv[savedBooster.type] = Math.min(
-              BST_DEFAULTS[savedBooster.type],
-              (inv[savedBooster.type] ?? 0) + 1,
+          let updatedMems = null;
+          let updatedInv = null;
+
+          await runTransaction(db, async (transaction) => {
+            const mRef = doc(db, "meta", "members");
+            const matchRef = doc(db, "matches", activeMid);
+            
+            const [mSnap, matchSnap] = await Promise.all([
+              transaction.get(mRef),
+              transaction.get(matchRef)
+            ]);
+
+            const mems = mSnap.data() || {};
+            const matchData = matchSnap.data() || {};
+            
+            if (matchData.locked || matchData.finalized) {
+              throw new Error("Match is locked — no booster changes allowed");
+            }
+
+            const inv = {
+              ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
+            };
+            if (savedBooster?.type) {
+              inv[savedBooster.type] = Math.min(
+                BST_DEFAULTS[savedBooster.type],
+                (inv[savedBooster.type] ?? 0) + 1,
+              );
+            }
+            inv[newBooster.type] = Math.max(
+              0,
+              (inv[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
             );
-          }
-          inv[newBooster.type] = Math.max(
-            0,
-            (inv[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
-          );
 
-          const batch = writeBatch(db);
-          batch.update(doc(db, "matches", activeMid), {
-            [`teams.${session.name}.booster`]: newBooster,
-            [`teams.${session.name}.updatedAt`]: Date.now(),
+            transaction.update(matchRef, {
+              [`teams.${session.name}.booster`]: newBooster,
+              [`teams.${session.name}.updatedAt`]: Date.now(),
+            });
+            transaction.set(mRef, {
+              [session.name]: { boosters: inv }
+            }, { merge: true });
+
+            updatedMems = mems;
+            updatedInv = inv;
           });
-          batch.set(doc(db, "meta", "members"), {
-            [session.name]: { boosters: inv }
-          }, { merge: true });
 
-          await batch.commit();
-
-          if (!mems[session.name]) mems[session.name] = {};
-          mems[session.name].boosters = inv;
+          if (!updatedMems[session.name]) updatedMems[session.name] = {};
+          updatedMems[session.name].boosters = updatedInv;
 
           // Update local state ONLY after successful DB writes
-          allMembers = mems;
+          allMembers = updatedMems;
           localTeam.booster = newBooster;
           if (activeMatches[activeMid]?.teams) {
             activeMatches[activeMid].teams[session.name] = {
@@ -1829,7 +1883,7 @@
       }
       // Legacy cutoff: plaintext PINs accepted only until this date, then refused.
       // Gives existing members time to log in and auto-upgrade their PINs.
-      const _PIN_LEGACY_DEADLINE = new Date("2026-05-05T00:00:00Z").getTime();
+      const _PIN_LEGACY_DEADLINE = new Date("2026-05-15T00:00:00Z").getTime();
       // Compare entered PIN against stored value (hashed or legacy plaintext).
       // If legacy match succeeds, auto-upgrades the stored PIN to its hash.
       async function verifyPin(enteredPin, storedPin, salt, upgradeCallback) {
@@ -1981,36 +2035,47 @@
           err.textContent = "Invalid join code";
           return;
         }
-        const mSnap = await getDoc(doc(db, "meta", "members"));
-        const members = mSnap.data() || {};
         // Case-insensitive duplicate check — "Rohit" and "rohit" would collide in the leaderboard
         const _nameLower = name.toLowerCase();
-        const _collision = Object.keys(members).find(
-          (k) => k.toLowerCase() === _nameLower && k !== name,
-        );
-        if (_collision) {
-          err.textContent = `Name already taken as "${_collision}" — choose a different name`;
+        
+        let newMemberData = null;
+        let allMembersSnapshot = {};
+        
+        err.textContent = "Setting up account…";
+        
+        try {
+          await runTransaction(db, async (transaction) => {
+            const mRef = doc(db, "meta", "members");
+            const mSnapTx = await transaction.get(mRef);
+            const mems = mSnapTx.data() || {};
+            
+            const _collision = Object.keys(mems).find(
+              (k) => k.toLowerCase() === _nameLower && k !== name,
+            );
+            if (_collision) throw new Error(`Name already taken as "${_collision}" — choose a different name`);
+
+            if (mems[name]) {
+              throw new Error("Name already registered — please use the regular Login screen instead.");
+            }
+            
+            const hashedJoinPin = await hashPin(pin, name);
+            newMemberData = {
+              pin: hashedJoinPin,
+              teamName: teamName || name + "'s Team",
+              joinedAt: Date.now(),
+              boosters: { ...BST_DEFAULTS },
+            };
+            
+            transaction.set(mRef, { [name]: newMemberData }, { merge: true });
+            mems[name] = newMemberData;
+            allMembersSnapshot = mems;
+          });
+        } catch (e) {
+          err.textContent = e.message;
           return;
         }
-        if (members[name]) {
-          // Existing member re-joining — verify their PIN
-          const _okJoin = await verifyPin(pin, members[name].pin, name);
-          if (!_okJoin) {
-            err.textContent =
-              "Name taken — use a different name or your correct PIN";
-            return;
-          }
-        }
-        const hashedJoinPin = await hashPin(pin, name);
-        const newMemberData = {
-          pin: hashedJoinPin,
-          teamName: teamName || name + "'s Team",
-          joinedAt: Date.now(),
-          boosters: members[name]?.boosters || { ...BST_DEFAULTS },
-        };
-        await setDoc(doc(db, "meta", "members"), { [name]: newMemberData }, { merge: true });
-        members[name] = newMemberData;
-        allMembers = members;        session = { name, isAdmin: false };
+        
+        allMembers = allMembersSnapshot;        session = { name, isAdmin: false };
         memberSelectedMatchId = currentMatchId;
         const tJoinSnap = currentMatchId ? getTeams(currentMatchId)[name] || {} : {};
         localTeam = {
@@ -2067,8 +2132,8 @@
             : "";
           return `<button class="mst-tab ${isSelected ? "mst-active" : ""}" onclick="selectMemberMatch('${mid}')" style="${_mStyle}">
           <div class="mst-flags">
-            ${m.t1img ? `<img loading="lazy" decoding="async" src="${m.t1img}" class="mst-flag">` : ""}
-            ${m.t2img ? `<img loading="lazy" decoding="async" src="${m.t2img}" class="mst-flag">` : ""}
+            ${m.t1img ? `<img loading="lazy" decoding="async" src="${escAttr(m.t1img)}" class="mst-flag">` : ""}
+            ${m.t2img ? `<img loading="lazy" decoding="async" src="${escAttr(m.t2img)}" class="mst-flag">` : ""}
           </div>
           <span class="mst-name">${shortName(m.label || mid)}</span>
           <span class="mst-status ${statusClass}">${status}</span>
@@ -2278,8 +2343,8 @@
     </div>
     <div class="match-bar-content">
       <div class="match-flags">
-        ${viewMatch.t1img ? `<img loading="lazy" decoding="async" src="${viewMatch.t1img}" class="match-flag">` : ""}
-        ${viewMatch.t2img ? `<img loading="lazy" decoding="async" src="${viewMatch.t2img}" class="match-flag">` : ""}
+        ${viewMatch.t1img ? `<img loading="lazy" decoding="async" src="${escAttr(viewMatch.t1img)}" class="match-flag">` : ""}
+        ${viewMatch.t2img ? `<img loading="lazy" decoding="async" src="${escAttr(viewMatch.t2img)}" class="match-flag">` : ""}
       </div>
       <div class="match-title">${viewMatch.label || "–"}</div>
       ${viewMatch.venue ? `<div class="match-venue">🏟️ ${viewMatch.venue}</div>` : ""}
@@ -3201,8 +3266,8 @@
           : `
   <div class="reveal-banner" style="border-top-color:${_lbtc.primary}; background:linear-gradient(${_lbtc.gradient}), var(--glass);">
     <div class="rb-flags">
-      ${match.t1img ? `<img loading="lazy" decoding="async" src="${match.t1img}" class="rb-flag">` : ""}
-      ${match.t2img ? `<img loading="lazy" decoding="async" src="${match.t2img}" class="rb-flag">` : ""}
+      ${match.t1img ? `<img loading="lazy" decoding="async" src="${escAttr(match.t1img)}" class="rb-flag">` : ""}
+      ${match.t2img ? `<img loading="lazy" decoding="async" src="${escAttr(match.t2img)}" class="rb-flag">` : ""}
     </div>
     <div class="rb-eye">🏏 ${match.locked ? "LIVE SCORES" : "TEAMS REVEALED"}</div>
     <div class="rb-title">${match.label || "Match"}</div>
@@ -3595,7 +3660,7 @@
               const eco =
                 s.eco != null
                   ? s.eco
-                  : s.overs && s.runsConceded != null
+                  : s.overs && s.runsConceded != null && toRealOvers(s.overs || 0) > 0
                     ? (
                         (s.runsConceded || 0) / toRealOvers(s.overs || 0)
                       ).toFixed(1)
@@ -3768,8 +3833,8 @@
                     : `openMatchSummary('${m.matchId}')`;
                 return `<div class="hlist-card" onclick="${_fn}">
                 <div class="hlc-logos">
-                  ${t1img ? `<img loading="lazy" decoding="async" src="${t1img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
-                  ${t2img ? `<img loading="lazy" decoding="async" src="${t2img}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
+                  ${t1img ? `<img loading="lazy" decoding="async" src="${escAttr(t1img)}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
+                  ${t2img ? `<img loading="lazy" decoding="async" src="${escAttr(t2img)}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
                 </div>
                 <div class="hlc-info">
                   <div class="hlc-label">${shortLabel}</div>
@@ -3978,7 +4043,7 @@
           return `
             <div class="hsc-bat-row${isDuck ? " hsc-row-duck" : ""}">
               <span class="hsc-col-name">
-                <span class="hsc-batter-name">${name}${no ? '<span class="hsc-no">*</span>' : ""}</span>
+                <span class="hsc-batter-name">${escHtml(name)}${no ? '<span class="hsc-no">*</span>' : ""}</span>
                 ${fld ? `<span class="hsc-fld">${fld}</span>` : ""}
               </span>
               <span class="hsc-col-r">
@@ -3998,7 +4063,7 @@
           return `
             <div class="hsc-bowl-row">
               <span class="hsc-col-name">
-                <span class="hsc-batter-name">${name}</span>
+                <span class="hsc-batter-name">${escHtml(name)}</span>
                 ${haulBadge(w)}
               </span>
               <span class="hsc-col-r">${fmtOv(s.overs)}</span>
@@ -4173,9 +4238,9 @@
             <button class="msv-back" onclick="${backFn}">← Back</button>
             <div class="hsc-match-hd">
               <div class="hsc-match-teams">
-                ${t1img ? `<img loading="lazy" decoding="async" src="${t1img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
+                ${t1img ? `<img loading="lazy" decoding="async" src="${escAttr(t1img)}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
                 <span class="hsc-match-vs">vs</span>
-                ${t2img ? `<img loading="lazy" decoding="async" src="${t2img}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
+                ${t2img ? `<img loading="lazy" decoding="async" src="${escAttr(t2img)}" class="hsc-match-logo" onerror="this.style.display='none'">` : ""}
               </div>
               <div class="hsc-match-label">${(match.label || "Match Scorecard").split(",")[0]}</div>
               ${match.label?.includes(",") ? `<div class="hsc-match-sub">${match.label.split(",").slice(1).join(",").trim()}</div>` : ""}
@@ -4610,19 +4675,28 @@
       }
 
       function getCredits(playerName) {
+        if (!playerName) return 7;
         if (PLAYER_CREDITS[playerName]) return PLAYER_CREDITS[playerName];
-        // Fuzzy: try partial/last name match
-        const n = playerName.toLowerCase();
+        
+        const n = playerName.toLowerCase().trim();
+        const nParts = n.split(" ").filter(Boolean);
+        if (nParts.length === 0) return 7;
+        const nLast = nParts[nParts.length - 1];
+        const nFirstChar = nParts[0][0];
+
         for (const [key, val] of Object.entries(PLAYER_CREDITS)) {
-          const k = key.toLowerCase();
-          const lastName = k.split(" ").pop();
-          if (
-            lastName.length > 3 &&
-            n.includes(lastName) &&
-            k.includes(n.split(" ").pop())
-          )
+          const k = key.toLowerCase().trim();
+          const kParts = k.split(" ").filter(Boolean);
+          if (kParts.length === 0) continue;
+          
+          if (n === k) return val;
+          
+          const kLast = kParts[kParts.length - 1];
+          const kFirstChar = kParts[0][0];
+          
+          if (nLast === kLast && nFirstChar === kFirstChar && nLast.length > 2) {
             return val;
-          if (k.includes(n) || n.includes(k)) return val;
+          }
         }
         return 7; // default budget
       }
@@ -5156,43 +5230,44 @@
             const prevBooster = (allTeams[session.name] || {}).booster || null;
             const newBooster = localTeam.booster || null;
             const boosterChanged = JSON.stringify(prevBooster) !== JSON.stringify(newBooster);
-            // Read current booster inventory BEFORE writing, so the batch is atomic
+            
             let inv2 = null;
-            if (boosterChanged) {
-              const mSnap2 = await getDoc(doc(db, "meta", "members"));
-              const mems2 = mSnap2.data() || {};
-              inv2 = {
-                ...(mems2[session.name]?.boosters || BST_DEFAULTS),
-              };
-              if (prevBooster?.type)
-                inv2[prevBooster.type] = Math.min(
-                  BST_DEFAULTS[prevBooster.type],
-                  (inv2[prevBooster.type] ?? 0) + 1,
-                );
-              if (newBooster?.type)
-                inv2[newBooster.type] = Math.max(
-                  0,
-                  (inv2[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
-                );
-            }
-            // Atomic batch: team + booster inventory written together
-            const batch = writeBatch(db);
-            batch.update(matchRef, {
-              [`teams.${session.name}`]: {
-                players: localTeam.players,
-                captain: localTeam.captain,
-                vc: localTeam.vc,
-                booster: newBooster,
-                submitted: true,
-                updatedAt: Date.now(),
-              },
+            
+            await runTransaction(db, async (transaction) => {
+              if (boosterChanged) {
+                const mSnap2 = await transaction.get(doc(db, "meta", "members"));
+                const mems2 = mSnap2.data() || {};
+                inv2 = {
+                  ...(mems2[session.name]?.boosters || BST_DEFAULTS),
+                };
+                if (prevBooster?.type)
+                  inv2[prevBooster.type] = Math.min(
+                    BST_DEFAULTS[prevBooster.type],
+                    (inv2[prevBooster.type] ?? 0) + 1,
+                  );
+                if (newBooster?.type)
+                  inv2[newBooster.type] = Math.max(
+                    0,
+                    (inv2[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
+                  );
+              }
+              transaction.update(matchRef, {
+                [`teams.${session.name}`]: {
+                  players: localTeam.players,
+                  captain: localTeam.captain,
+                  vc: localTeam.vc,
+                  booster: newBooster,
+                  submitted: true,
+                  updatedAt: Date.now(),
+                },
+              });
+              if (boosterChanged && inv2) {
+                transaction.set(doc(db, "meta", "members"), {
+                  [session.name]: { boosters: inv2 }
+                }, { merge: true });
+              }
             });
-            if (boosterChanged && inv2) {
-              batch.set(doc(db, "meta", "members"), {
-                [session.name]: { boosters: inv2 }
-              }, { merge: true });
-            }
-            await batch.commit();
+
             // Update local state after successful commit
             if (boosterChanged && inv2) {
               if (!allMembers[session.name]) allMembers[session.name] = {};
@@ -5255,8 +5330,8 @@
           if (!label) return "";
           return `<button class="mst-tab ${isSelected ? "mst-active" : ""}" onclick="selectMatchTab('${mid}')">
           <div class="mst-flags">
-            ${m.t1img ? `<img loading="lazy" decoding="async" src="${m.t1img}" class="mst-flag">` : ""}
-            ${m.t2img ? `<img loading="lazy" decoding="async" src="${m.t2img}" class="mst-flag">` : ""}
+            ${m.t1img ? `<img loading="lazy" decoding="async" src="${escAttr(m.t1img)}" class="mst-flag">` : ""}
+            ${m.t2img ? `<img loading="lazy" decoding="async" src="${escAttr(m.t2img)}" class="mst-flag">` : ""}
           </div>
           <span class="mst-name">${shortName(label)}</span>
           <span class="mst-status ${statusClass}">${status}</span>
@@ -6409,8 +6484,6 @@
             const m = robustMatch(b.batsman?.name || b.name || "");
             if (!m) return;
             const n = nl[m];
-            if (playerStatus[n] !== "playing")
-              statsUpdate[`playerStatus.${n}`] = "playing";
             const balls = b.b || 0,
               runs = b.r || 0;
             const dismissed =
@@ -6457,8 +6530,6 @@
             bowlAcc[n].runsConceded += bw.r || 0;
             bowlAcc[n].maidens += bw.m || 0;
             if (bw.eco != null) bowlAcc[n]._lastEco = bw.eco;
-            if (playerStatus[n] !== "playing")
-              statsUpdate[`playerStatus.${n}`] = "playing";
           });
           (inn.catching || []).forEach((c) => {
             if (c.catcher?.name) {
@@ -6511,7 +6582,6 @@
             fours: null,
             sixes: null,
             notOut: null,
-            playingXI: true,
           };
           statsUpdate[`stats.${n}.bat_runs`] = s.runs;
           statsUpdate[`stats.${n}.bat_balls`] = s.balls;
@@ -6525,7 +6595,6 @@
           statsUpdate[`stats.${n}.fours`] = null;
           statsUpdate[`stats.${n}.sixes`] = null;
           statsUpdate[`stats.${n}.notOut`] = null;
-          statsUpdate[`stats.${n}.playingXI`] = true;
           updated++;
         });
         Object.entries(bowlAcc).forEach(([n, s]) => {
@@ -6539,7 +6608,6 @@
             ...(playerStats[n] || {}),
             ...s,
             eco,
-            playingXI: true,
           };
           delete playerStats[n]._lastEco;
           statsUpdate[`stats.${n}.wickets`] = s.wickets;
@@ -6548,11 +6616,10 @@
           statsUpdate[`stats.${n}.maidens`] = s.maidens;
           statsUpdate[`stats.${n}.lbwBowled`] = s.lbwBowled;
           if (eco != null) statsUpdate[`stats.${n}.eco`] = eco;
-          statsUpdate[`stats.${n}.playingXI`] = true;
           updated++;
         });
         Object.entries(catchAcc).forEach(([n, s]) => {
-          playerStats[n] = { ...(playerStats[n] || {}), playingXI: true };
+          playerStats[n] = { ...(playerStats[n] || {}) };
           if (s.catches > 0) {
             playerStats[n].catches = s.catches;
             statsUpdate[`stats.${n}.catches`] = s.catches;
@@ -6811,7 +6878,10 @@
 
       <div class="acard">
         <div class="acard-t">⚙️ League Settings</div>
-        <div class="field"><label>Admin PIN</label><input id="adminPinInp" type="text" maxlength="4" value="${escAttr(metaGame.adminPin || "0000")}"></div>
+        <div class="field">
+          <label>Admin PIN <span class="hint">(Leave blank to keep current)</span></label>
+          <input id="adminPinInp" type="password" maxlength="4" placeholder="••••">
+        </div>
         <button class="btn-sm" onclick="adminSaveLeague()">Save</button>
       </div>
 
@@ -6829,8 +6899,8 @@
           hasProfile
             ? `
         <div class="admin-profile-status">
-          <span class="ap-name">👤 ${adminProfile.name}</span>
-          <span class="ap-team">${adminProfile.teamName || "–"}</span>
+          <span class="ap-name">👤 ${escHtml(adminProfile.name)}</span>
+          <span class="ap-team">${escHtml(adminProfile.teamName || "–")}</span>
           ${myTeam.submitted ? `<span class="pill pill-green" style="font-size:11px">✓ Team submitted</span>` : `<span class="pill" style="background:rgba(242,180,17,.1);color:var(--gold);border:1px solid rgba(242,180,17,.3);font-size:11px">Team not picked</span>`}
         </div>
         ${hasMatch ? `<button class="btn-reveal" style="font-size:15px;margin-top:10px" onclick="adminPickMyTeam()">🏏 PICK MY TEAM FOR THIS MATCH</button>` : ""}
@@ -7287,85 +7357,79 @@
         // intermediate flashes (season updated but match not yet finalized)
         skipNextRefresh = true;
         try {
-          // Always fetch FRESH data from Firestore — never use in-memory cache here.
-          // If admin just hit "Save All" then immediately "Finalize", the onSnapshot
-          // may not have propagated the latest stats into activeMatches yet.
-          const [matchSnap, stSnap] = await Promise.all([
-            getDoc(doc(db, "matches", activeMid)),
-            getDoc(doc(db, "season", "totals")),
-          ]);
-          if (!matchSnap.exists()) throw new Error("Match not found");
-          const freshMatch = matchSnap.data();
-          const stats = freshMatch.stats || {};
-          const teams = freshMatch.teams || {};
-          const match = freshMatch;
-
-          // Guard: prevent double-finalize from corrupting totals
-          // (allow re-finalize only from the finalized state — "Update Finalized")
-          if (
-            freshMatch.finalized &&
-            !confirm("Match already finalized. Re-save updated points?")
-          ) {
+          // Check finalized state before transaction to avoid UI prompts inside retries
+          const preSnap = await getDoc(doc(db, "matches", activeMid));
+          if (!preSnap.exists()) throw new Error("Match not found");
+          if (preSnap.data().finalized && !confirm("Match already finalized. Re-save updated points?")) {
             btn.textContent = "♻️ Update Finalized";
             btn.disabled = false;
             skipNextRefresh = false;
             return;
           }
 
-          const members = Object.keys(allMembers);
-          const totals = stSnap.exists() ? stSnap.data() : {};
-          const _finPlayers = freshMatch.players || [];
+          let remainingIds = [];
 
-          members.forEach((name) => {
-            const t = teams[name] || {};
-            const pts = memberMatchTotal(t, stats, _finPlayers);
-            if (!totals[name]) totals[name] = { total: 0, matches: [] };
+          await runTransaction(db, async (transaction) => {
+            const mRef = doc(db, "matches", activeMid);
+            const sRef = doc(db, "season", "totals");
+            const gRef = doc(db, "meta", "game");
+            
+            const [matchSnap, stSnap, gSnap] = await Promise.all([
+              transaction.get(mRef),
+              transaction.get(sRef),
+              transaction.get(gRef)
+            ]);
 
-            const existingIdx = totals[name].matches.findIndex(
-              (m) => m.matchId === activeMid,
-            );
-            if (existingIdx !== -1) {
-              // UPDATE: Subtract old points, add new ones
-              const oldPts = totals[name].matches[existingIdx].pts || 0;
-              totals[name].total = (totals[name].total || 0) - oldPts + pts;
-              totals[name].matches[existingIdx] = {
-                matchId: activeMid,
-                label: match.label || "Match",
-                pts,
-              };
-              console.log(`[Finalizer] Updated ${name}: ${oldPts} -> ${pts}`);
-            } else {
-              // NEW: Just add
-              totals[name].total = (totals[name].total || 0) + pts;
-              totals[name].matches = [
-                ...(totals[name].matches || []),
-                { matchId: activeMid, label: match.label || "Match", pts },
-              ];
-              console.log(`[Finalizer] Added ${name}: ${pts} pts`);
+            if (!matchSnap.exists()) throw new Error("Match not found");
+            const freshMatch = matchSnap.data();
+            const stats = freshMatch.stats || {};
+            const teams = freshMatch.teams || {};
+            const match = freshMatch;
+
+            const members = Object.keys(allMembers);
+            const totals = stSnap.exists() ? stSnap.data() : {};
+            const _finPlayers = freshMatch.players || [];
+
+            members.forEach((name) => {
+              const t = teams[name] || {};
+              const pts = memberMatchTotal(t, stats, _finPlayers);
+              if (!totals[name]) totals[name] = { total: 0, matches: [] };
+
+              const existingIdx = totals[name].matches.findIndex(
+                (m) => m.matchId === activeMid,
+              );
+              if (existingIdx !== -1) {
+                const oldPts = totals[name].matches[existingIdx].pts || 0;
+                totals[name].total = (totals[name].total || 0) - oldPts + pts;
+                totals[name].matches[existingIdx] = {
+                  matchId: activeMid,
+                  label: match.label || "Match",
+                  pts,
+                };
+              } else {
+                totals[name].total = (totals[name].total || 0) + pts;
+                totals[name].matches = [
+                  ...(totals[name].matches || []),
+                  { matchId: activeMid, label: match.label || "Match", pts },
+                ];
+              }
+            });
+
+            const gd = gSnap.data() || {};
+            remainingIds = (gd.activeMatchIds || []).filter((id) => id !== activeMid);
+            const updates = { activeMatchIds: remainingIds };
+            if (gd.currentMatchId === activeMid) {
+              updates.currentMatchId = remainingIds[0] || "";
             }
+
+            transaction.set(sRef, totals, { merge: true });
+            transaction.update(mRef, { finalized: true });
+            transaction.update(gRef, updates);
           });
 
-          // Remove finalized match from activeMatchIds and clear currentMatchId if needed
-          const remaining = (metaGame.activeMatchIds || []).filter(
-            (id) => id !== activeMid,
-          );
-          const updates = { activeMatchIds: remaining };
-          if (currentMatchId === activeMid) {
-            updates.currentMatchId = remaining[0] || "";
-          }
-
-          // Write season totals + finalized flag + game state together before releasing the refresh block
-          const batch = writeBatch(db);
-          batch.set(doc(db, "season", "totals"), totals, { merge: true });
-          batch.update(doc(db, "matches", activeMid), { finalized: true });
-          batch.update(doc(db, "meta", "game"), updates);
-          await batch.commit();
-
-          // Reset selected match synchronously so the next refreshView shows a clean state
-          adminSelectedMatchId = remaining[0] || null;
+          adminSelectedMatchId = remainingIds[0] || null;
 
           stopAR();
-          // Release refresh block — next onSnapshot will show fully-consistent state
           skipNextRefresh = false;
 
           (function launchFireworks() {
@@ -7539,72 +7603,73 @@
           return;
         skipNextRefresh = true;
         try {
-          // Fresh read from Firestore — avoids stale cache for point calculations
-          const [matchSnap, stSnap] = await Promise.all([
-            getDoc(doc(db, "matches", activeMid)),
-            getDoc(doc(db, "season", "totals")),
-          ]);
-          if (!matchSnap.exists()) throw new Error("Match not found");
-          const freshMatch = matchSnap.data();
-          const rawStats = freshMatch.stats || {};
-          const teams = freshMatch.teams || {};
+          let remainingIds = [];
 
-          // Deep-copy stats and auto-protect any batter on 0* (was playing when match stopped)
-          const stats = {};
-          const firestoreUpdate = {};
-          Object.keys(rawStats).forEach((p) => {
-            const s = { ...rawStats[p] };
-            const effectiveRuns = s.bat_runs ?? s.runs ?? 0;
-            const effectiveNotOut = s.bat_notOut ?? s.notOut ?? false;
+          await runTransaction(db, async (transaction) => {
+            const mRef = doc(db, "matches", activeMid);
+            const sRef = doc(db, "season", "totals");
+            const gRef = doc(db, "meta", "game");
 
-            if (s.batted && effectiveRuns === 0 && !effectiveNotOut) {
-              s.notOut = true;
-              s.bat_notOut = true;
-              firestoreUpdate[`stats.${p}.notOut`] = true;
-              firestoreUpdate[`stats.${p}.bat_notOut`] = true;
+            const [matchSnap, stSnap, gSnap] = await Promise.all([
+              transaction.get(mRef),
+              transaction.get(sRef),
+              transaction.get(gRef)
+            ]);
+
+            if (!matchSnap.exists()) throw new Error("Match not found");
+            const freshMatch = matchSnap.data();
+            const rawStats = freshMatch.stats || {};
+            const teams = freshMatch.teams || {};
+
+            const stats = {};
+            const firestoreUpdate = { finalized: true, abandoned: true };
+            Object.keys(rawStats).forEach((p) => {
+              const s = { ...rawStats[p] };
+              const effectiveRuns = s.bat_runs ?? s.runs ?? 0;
+              const effectiveNotOut = s.bat_notOut ?? s.notOut ?? false;
+
+              if (s.batted && effectiveRuns === 0 && !effectiveNotOut) {
+                s.notOut = true;
+                s.bat_notOut = true;
+                firestoreUpdate[`stats.${p}.notOut`] = true;
+                firestoreUpdate[`stats.${p}.bat_notOut`] = true;
+              }
+              stats[p] = s;
+            });
+
+            const members = Object.keys(allMembers);
+            const totals = stSnap.exists() ? stSnap.data() : {};
+            const _abdPlayers = freshMatch.players || [];
+            members.forEach((name) => {
+              const t = teams[name] || {};
+              const pts = memberMatchTotal(t, stats, _abdPlayers);
+              if (!totals[name]) totals[name] = { total: 0, matches: [] };
+              if (!totals[name].matches.some((m) => m.matchId === activeMid)) {
+                totals[name].total = (totals[name].total || 0) + pts;
+                totals[name].matches = [
+                  ...(totals[name].matches || []),
+                  {
+                    matchId: activeMid,
+                    label: (freshMatch.label || "Match") + " 🌧️",
+                    pts,
+                  },
+                ];
+              }
+            });
+
+            const gd = gSnap.data() || {};
+            remainingIds = (gd.activeMatchIds || []).filter((id) => id !== activeMid);
+            const updates = { activeMatchIds: remainingIds };
+            if (gd.currentMatchId === activeMid) {
+              updates.currentMatchId = remainingIds[0] || "";
             }
-            stats[p] = s;
+
+            transaction.set(sRef, totals, { merge: true });
+            transaction.update(mRef, firestoreUpdate);
+            transaction.update(gRef, updates);
           });
-          // Persist the notOut flags so stats in Firestore are accurate
-          if (Object.keys(firestoreUpdate).length) {
-            await updateDoc(doc(db, "matches", activeMid), firestoreUpdate);
-          }
-          // Save points to season totals
-          const members = Object.keys(allMembers);
-          const totals = stSnap.exists() ? stSnap.data() : {};
-          const _abdPlayers = freshMatch.players || [];
-          members.forEach((name) => {
-            const t = teams[name] || {};
-            const pts = memberMatchTotal(t, stats, _abdPlayers);
-            if (!totals[name]) totals[name] = { total: 0, matches: [] };
-            if (!totals[name].matches.some((m) => m.matchId === activeMid)) {
-              totals[name].total = (totals[name].total || 0) + pts;
-              totals[name].matches = [
-                ...(totals[name].matches || []),
-                {
-                  matchId: activeMid,
-                  label: (freshMatch.label || "Match") + " 🌧️",
-                  pts,
-                },
-              ];
-            }
-          });
-          const batch = writeBatch(db);
-          batch.set(doc(db, "season", "totals"), totals, { merge: true });
-          batch.update(doc(db, "matches", activeMid), {
-            finalized: true,
-            abandoned: true,
-          });
-          await batch.commit();
-          const remaining = (metaGame.activeMatchIds || []).filter(
-            (id) => id !== activeMid,
-          );
-          const updates = { activeMatchIds: remaining };
-          if (currentMatchId === activeMid) {
-            updates.currentMatchId = remaining[0] || "";
-          }
-          await updateDoc(doc(db, "meta", "game"), updates);
-          adminSelectedMatchId = remaining[0] || null;
+
+          adminSelectedMatchId = remainingIds[0] || null;
           stopAR();
           skipNextRefresh = false;
           toast("Match abandoned — points saved 🌧️");
@@ -7972,8 +8037,9 @@
           document.getElementById("manualTeam")?.value || ""
         ).trim();
         const role = document.getElementById("manualRole")?.value || "BAT";
-        if (!name) {
-          toast("Enter a player name", "err");
+        const nameErr = validateName(name);
+        if (nameErr) {
+          toast(nameErr, "err");
           return;
         }
         if (!team) {
@@ -8693,6 +8759,10 @@
       // League tab handlers:
       window.adminSaveLeague = async function () {
         const _pin = document.getElementById("adminPinInp").value.trim();
+        if (!_pin) {
+          toast("No changes made");
+          return;
+        }
         if (_pin.length !== 4 || !/^\d{4}$/.test(_pin)) {
           toast("PIN must be exactly 4 digits", "err");
           return;
@@ -8700,7 +8770,8 @@
         try {
           const _hashedAdmin = await hashPin(_pin, "__admin__");
           await updateDoc(doc(db, "meta", "game"), { adminPin: _hashedAdmin });
-          toast("Saved ✓");
+          document.getElementById("adminPinInp").value = "";
+          toast("Admin PIN Updated ✓");
         } catch (e) {
           toast("Save failed: " + e.message, "err");
         }
@@ -9516,7 +9587,7 @@
               const infoRes = await _cricFetch(
                 `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
               );
-              const infoData = await infoRes.json();
+              const infoData = infoRes;
               if (infoData.status === "success") {
                 const infoScore = infoData.data?.score || [];
                 const infoStatus = infoData.data?.status || "";
@@ -9547,10 +9618,6 @@
               const m = robustMatch(raw);
               if (!m) return;
               const n = nl[m];
-
-              // Always mark playing XI status — player is confirmed in the lineup
-              if (playerStatus[n] !== "playing")
-                statsUpdate[`playerStatus.${n}`] = "playing";
 
               // Guard: skip batting record for players at crease but who haven't faced a delivery yet.
               // CricAPI lists all batting-order players in the scorecard from the moment the innings
@@ -9613,8 +9680,6 @@
               bowlAcc[n].maidens += bw.m || 0;
               // Store API eco for single-innings (T20/ODI); multi-innings recalculates below
               if (bw.eco != null) bowlAcc[n]._lastEco = bw.eco;
-              if (playerStatus[n] !== "playing")
-                statsUpdate[`playerStatus.${n}`] = "playing";
             });
             // catching array: catches, stumpings, lbwBowled (per bowler), run-outs
             (inn.catching || []).forEach((c) => {
@@ -9664,7 +9729,6 @@
               bat_6s: bstats.sixes,
               bat_notOut: bstats.notOut,
               batted: true,
-              playingXI: true,
             };
           });
           Object.entries(bowlAcc).forEach(([n, bstats]) => {
@@ -9701,12 +9765,11 @@
               fours: null,
               sixes: null,
               notOut: null,
-              playingXI: true,
             };
             updated++;
           });
           Object.entries(catchAcc).forEach(([n, cstats]) => {
-            playerStats[n] = { ...(playerStats[n] || {}), playingXI: true };
+            playerStats[n] = { ...(playerStats[n] || {}) };
             if (cstats.catches > 0) playerStats[n].catches = cstats.catches;
             if (cstats.stumpings > 0)
               playerStats[n].stumpings = cstats.stumpings;
@@ -9882,8 +9945,9 @@
             }
           }
 
-          // Auto-lock when scorecard confirms match has started (at least one batsman faced a ball)
+          // Auto-lock when scorecard confirms match has started (at least one batsman faced a ball AND API says started)
           if (
+            started &&
             !activeMatchData?.locked &&
             !activeMatchData?.finalized &&
             sc.some((inn) => (inn.batting || []).length > 0)
@@ -10343,17 +10407,17 @@
 
         return `<div class="score-pill" id="scorePill">
   <div class="sp-team">
-    ${t1Img ? `<img loading="lazy" decoding="async" src="${t1Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
-    <span class="sp-abbr">${t1Name}</span>
+    ${t1Img ? `<img loading="lazy" decoding="async" src="${escAttr(t1Img)}" class="sp-logo" onerror="this.style.display='none'">` : ""}
+    <span class="sp-abbr">${escHtml(t1Name)}</span>
     <span class="sp-score" id="sp-score-t1">${s1 || ""}</span>
   </div>
   <span class="sp-vs">vs</span>
   <div class="sp-team">
-    ${t2Img ? `<img loading="lazy" decoding="async" src="${t2Img}" class="sp-logo" onerror="this.style.display='none'">` : ""}
-    <span class="sp-abbr">${t2Name}</span>
+    ${t2Img ? `<img loading="lazy" decoding="async" src="${escAttr(t2Img)}" class="sp-logo" onerror="this.style.display='none'">` : ""}
+    <span class="sp-abbr">${escHtml(t2Name)}</span>
     <span class="sp-score" id="sp-score-t2">${s2 || ""}</span>
   </div>
-  <span class="sp-label" id="sp-label">${shortLabel}</span>
+  <span class="sp-label" id="sp-label">${escHtml(shortLabel)}</span>
   <span class="sp-badge ${badgeClass}" id="sp-badge">${badgeText}</span>
 </div>`;
       }

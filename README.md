@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.11.0** — [Changelog](#-changelog)
+**Current version: v3.12.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,15 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.12.0 — April 30, 2026
+**Logic & Data Integrity Overhaul**
+- **Atomic Transactions**: Converted `applyBoosterChoice`, `removeBooster`, `handleLockTeam`, and `doJoin` to use `runTransaction`. Prevents booster inventory duplication and member registration collisions.
+- **Impact-Sub Double Counting**: Fixed an issue where `autoFetchStats` unconditionally set `playingXI: true` for any player who batted/bowled, improperly stacking +4 points for both the original starter and the impact sub.
+- **Economy NaN Fix**: Added division-by-zero guards to the economy rate calculation and resolved `toRealOvers("4.6")` returning an incorrect value of `5.0`.
+- **Fuzzy Match Shadowing**: Refactored `getCredits` to use a strict initial+last-name check, preventing substring-shadowing (e.g., "Patel" incorrectly assigning credits for "Harshit Patel").
+- **Auto-Lock Sync**: Added an explicit API `matchStarted` check to the auto-lock trigger, preventing premature lockouts if CricAPI publishes the batting lineup at the toss.
+- **Global Error Handlers**: Added `window.onerror` and `unhandledrejection` listeners to catch silent asynchronous failures.
 
 ### v3.11.0 — April 29, 2026
 **Architectural Hardening & Code Quality**
