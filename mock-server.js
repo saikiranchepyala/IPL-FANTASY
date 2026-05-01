@@ -233,6 +233,26 @@ const routes = {
   "/v1/match_info": (params) => {
     return matchInfoFallback();
   },
+  "/v1/fantasySquad": (params) => ({
+    status: "success",
+    data: [
+      {
+        teamName: "Rajasthan Royals",
+        players: [
+          { id: "p1", name: "Brijesh Sharma", role: "Allrounder", fantasyCredits: 8 },
+          { id: "p2", name: "Yash Raj Punja", role: "Allrounder", fantasyCredits: 7.5 },
+          { id: "p3", name: "Sanju Samson", role: "Wicketkeeper Batter", fantasyCredits: 10 }
+        ]
+      },
+      {
+        teamName: "Royal Challengers Bangalore",
+        players: [
+          { id: "p1001", name: "Virat Kohli", role: "Batter", fantasyCredits: 11 },
+          { id: "p1002", name: "Faf du Plessis", role: "Batter", fantasyCredits: 9.5 }
+        ]
+      }
+    ]
+  }),
   "/v1/match_squad": (params) => ({
     status: "success",
     data: [

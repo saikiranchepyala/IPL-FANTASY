@@ -4676,6 +4676,16 @@
 
       function getCredits(playerName) {
         if (!playerName) return 7;
+
+        // 1. Check dynamically fetched credits from the current match first
+        const activeMid = memberSelectedMatchId || currentMatchId;
+        const matchPlayersList = activeMid ? getMatch(activeMid)?.players || matchPlayers || [] : matchPlayers || [];
+        const dynamicPlayer = matchPlayersList.find((p) => p.name === playerName);
+        if (dynamicPlayer && dynamicPlayer.credits != null) {
+          return dynamicPlayer.credits;
+        }
+
+        // 2. Fallback to hardcoded database
         if (PLAYER_CREDITS[playerName]) return PLAYER_CREDITS[playerName];
         
         const n = playerName.toLowerCase().trim();
@@ -9078,38 +9088,58 @@
         if (!key || !mid) return;
         try {
           const ROLE_OVERRIDES = { "Brijesh Sharma": "BOWL", "Yash Raj Punja": "BOWL" };
-          // 1. Direct fetch using Match ID (prevents lag from list endpoints)
-          const url = `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`;
-          const res = await _cricFetch(url);
-          if (res.status === "failure") throw new Error(res.reason);
+          
+          // Fetch match_info (for team logos) and fantasySquad (for credits) concurrently
+          const [infoRes, fantasyRes] = await Promise.all([
+            _cricFetch(`https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`).catch(e => ({ status: "failure", reason: e.message })),
+            _cricFetch(`https://api.cricapi.com/v1/fantasySquad?apikey=${key}&id=${mid}`).catch(e => ({ status: "failure", reason: e.message }))
+          ]);
 
           let players = [];
-          const matchData = res.data;
-
-          // Strategy: Try teamInfo (roles included) -> fallback to squad (names only)
-          if (matchData.teamInfo && matchData.teamInfo.length > 0) {
-            const t1img = matchData.teamInfo[0]?.img || "";
-            const t2img = matchData.teamInfo[1]?.img || "";
+          
+          if (infoRes.status === "success" && infoRes.data?.teamInfo?.length > 0) {
+            const t1img = infoRes.data.teamInfo[0]?.img || "";
+            const t2img = infoRes.data.teamInfo[1]?.img || "";
             if (t1img || t2img) {
-              await updateDoc(doc(db, "matches", firestoreMatchId), {
-                t1img,
-                t2img,
-              });
+              await updateDoc(doc(db, "matches", firestoreMatchId), { t1img, t2img });
             }
-            matchData.teamInfo.forEach((team) => {
+          }
+
+          // 1. Try fantasySquad first to get exact fantasy credits
+          if (fantasyRes.status === "success" && fantasyRes.data) {
+            const teamsData = Array.isArray(fantasyRes.data) ? fantasyRes.data : [fantasyRes.data];
+            teamsData.forEach((team) => {
+              (team.players || []).forEach((p) => {
+                players.push({
+                  id: p.id,
+                  name: p.name,
+                  team: team.teamName || team.name || "Team",
+                  role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                  credits: p.fantasyCredits || p.fantasyPlayerRating || null
+                });
+              });
+            });
+          }
+
+          // 2. Fallback to match_info (teamInfo) if fantasySquad failed or had no players
+          if (players.length < 5 && infoRes.status === "success" && infoRes.data?.teamInfo?.length > 0) {
+            players = []; // Reset just in case
+            infoRes.data.teamInfo.forEach((team) => {
               (team.players || []).forEach((p) => {
                 players.push({
                   id: p.id,
                   name: p.name,
                   team: team.shortname || team.name,
                   role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                  credits: null
                 });
               });
             });
           }
 
-          // Fallback to match_squad if teamInfo was empty
+          // 3. Fallback to match_squad if still empty
           if (players.length < 5) {
+            players = []; // Reset just in case
             const squadRes = await _cricFetch(
               `https://api.cricapi.com/v1/match_squad?apikey=${key}&id=${mid}`,
             );
@@ -9124,6 +9154,7 @@
                     name: p.name,
                     team: team.teamName || team.name || "Team",
                     role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                    credits: null
                   });
                 });
               });
@@ -9139,6 +9170,8 @@
             await updateDoc(doc(db, "matches", targetMid), { players });
             saveToPlayerCache(players);
             toast(`Loaded ${players.length} players for match`);
+          } else {
+            toast("No players found from API", "err");
           }
         } catch (e) {
           console.warn("Squad load failed:", e.message);
