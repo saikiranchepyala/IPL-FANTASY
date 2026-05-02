@@ -188,20 +188,25 @@
 
       function resolveInningKey(inningRaw, match) {
         if (!inningRaw) return "";
-        const stripped = (inningRaw || "")
-          .replace(/\s*Inning\s*\d+/i, "")
-          .trim();
-        if (!stripped) return "";
-        
+        const raw = String(inningRaw);
+        const stripped = raw.replace(/\s*Inning\s*\d+/i, "").trim();
+
+        const splitLabel = (match?.label || "").split(/\s+(?:vs?|v)\s+/i);
+        const t1Key = match ? (resolveTeamKey(match.t1 || splitLabel[0]) || "T1") : "T1";
+        const t2Key = match ? (resolveTeamKey(match.t2 || splitLabel[1]) || "T2") : "T2";
+
+        // Handle "Inning 1" / "Inning 2" without team names
+        if (!stripped) {
+          if (raw.includes("1")) return t1Key;
+          if (raw.includes("2")) return t2Key;
+          return "";
+        }
+
         // 1. Direct resolution of the string
         const direct = resolveTeamKey(stripped);
         if (direct) return direct;
-        
+
         if (!match) return "";
-        const splitLabel = (match.label || "").split(/\s+(?:vs?|v)\s+/i);
-        const t1Key = resolveTeamKey(match.t1 || splitLabel[0]);
-        const t2Key = resolveTeamKey(match.t2 || splitLabel[1]);
-        
         const up = stripped.toUpperCase();
         const t1Up = (match.t1 || "").toUpperCase().trim();
         const t2Up = (match.t2 || "").toUpperCase().trim();
@@ -2650,6 +2655,19 @@
         const homeColor = IPL_TEAM_COLORS[t1Key]?.primary || "#2563ff";
         const awayColor = IPL_TEAM_COLORS[t2Key]?.primary || "#f59e0b";
 
+        // Find the "actually live" innings score (last one with activity)
+        let activeScore = scores.length > 0 ? scores[scores.length - 1] : null;
+        if (isLive && scores.length > 1) {
+          for (let i = scores.length - 1; i >= 0; i--) {
+            const s = scores[i];
+            const hasActivity = (s.r || 0) > 0 || (s.w || 0) > 0 || (s.o || 0) > 0;
+            if (hasActivity || i === 0) {
+              activeScore = s;
+              break;
+            }
+          }
+        }
+
         let contextLine = status || "Live Updates";
         if (match.finalized) {
           contextLine = `Final Result: ${match.matchResult || status || "Match Over"}`;
@@ -2670,7 +2688,7 @@
             // Fallback: calculate from attributed scores (used when status is generic)
             const isGeneric = !status || /^(live|live updates?|waiting|in progress)/i.test(status.trim());
             const _rrScoreByTeam = attributeScores(match, scores);
-            const _rrLastScore = scores[scores.length - 1];
+            const _rrLastScore = activeScore;
             const _rrCurKey = Object.keys(_rrScoreByTeam).find(k => _rrScoreByTeam[k] === _rrLastScore);
             const _rrFirstKey = Object.keys(_rrScoreByTeam).find(k => k !== _rrCurKey);
             if (_rrCurKey && _rrFirstKey) {
@@ -2695,10 +2713,10 @@
 
         const scoreByTeam = attributeScores(match, scores);
         const lookupWorked = Object.keys(scoreByTeam).length > 0;
-        const lastScore = scores.length > 0 ? scores[scores.length - 1] : null;
-        const curInnKey = lastScore
-          ? Object.keys(scoreByTeam).find((k) => scoreByTeam[k] === lastScore) || 
-            resolveInningKey(lastScore.inning, match)
+
+        const curInnKey = activeScore
+          ? Object.keys(scoreByTeam).find((k) => scoreByTeam[k] === activeScore) ||
+            resolveInningKey(activeScore.inning, match)
           : null;
 
         const zonesRaw = [
@@ -3144,9 +3162,19 @@
         };
 
         // Determine which innings is live (currently batting) to show the LIVE badge
-        const lastScore = scores.length ? scores[scores.length - 1] : null;
-        const liveInnKey = isLive && lastScore
-          ? (resolveInningKey ? resolveInningKey(lastScore.inning, match) : null)
+        let activeScore = scores.length > 0 ? scores[scores.length - 1] : null;
+        if (isLive && scores.length > 1) {
+          for (let i = scores.length - 1; i >= 0; i--) {
+            const s = scores[i];
+            const hasActivity = (s.r || 0) > 0 || (s.w || 0) > 0 || (s.o || 0) > 0;
+            if (hasActivity || i === 0) {
+              activeScore = s;
+              break;
+            }
+          }
+        }
+        const liveInnKey = isLive && activeScore
+          ? resolveInningKey(activeScore.inning, match)
           : null;
 
         const inningScore = (tk) => scores.find(sc => {
@@ -6535,7 +6563,6 @@
 
         function robustMatch(name) {
           if (!name) return null;
-          // Strip suffixes before matching (same as autoFetchStats ultra-strict logic)
           const clean = name
             .toLowerCase()
             .replace(/\(c\)|\(wk\)|\(sub\)|\(impact\)|sub|impact|batting|not out/gi, "")
@@ -6544,29 +6571,32 @@
           if (!clean) return null;
           if (nl[clean]) return clean;
 
-          // ULTRA STRICT: every meaningful word (len > 2) from API must exist in pool name
+          // ULTRA STRICT MATCH: prevents incorrect player mapping
           const hit = nlKeys.find((k) => {
             const poolWords = k.split(/\s+/);
             const apiWords = clean.split(/\s+/);
             const meaningfulApi = apiWords.filter((w) => w.length > 2);
             if (meaningfulApi.length === 0) return k === clean;
+
+            // 1. Every meaningful word from API must be in the pool name
             const allMatch = meaningfulApi.every((word) => poolWords.includes(word));
             if (!allMatch) return false;
-            if (meaningfulApi.length === 1 && poolWords.length > 1) return false;
+
+            // 2. If it's a single word match, it MUST be an exact match
+            if (meaningfulApi.length === 1 && poolWords.length > 1) {
+              return false;
+            }
             return true;
           });
           if (hit) return hit;
 
-          // Initials fallback (V Kohli → Virat Kohli)
           const parts = clean.split(/\s+/);
           if (parts.length >= 2) {
             const fi = parts[0][0],
               last = parts[parts.length - 1];
             const ih = nlKeys.find((k) => {
               const kp = k.split(/\s+/);
-              return (
-                kp.length >= 2 && kp[0][0] === fi && kp[kp.length - 1] === last
-              );
+              return kp.length >= 2 && kp[0][0] === fi && kp[kp.length - 1] === last;
             });
             if (ih) return ih;
           }
@@ -9955,35 +9985,61 @@
           if (ended) statsUpdate["matchEnded"] = true; // persist ended flag via main scorecard path
 
           // Extract current active players from scorecard (Live Batsmen & Bowler)
-          // Always run this even if ended so the final batsmen/bowler are correct
           if (sc.length > 0) {
-            // Pick the ACTIVE innings — not blindly sc[last]. 
-            // CricAPI doesn't guarantee innings order. Strategy:
-            // 1. Match against the API's score array (which is correctly ordered)
-            // 2. Fallback: innings with a designated striker
-            // 3. Fallback: last innings with < 10 wickets
-            let curInn = sc[sc.length - 1]; // default fallback
-            if (sc.length > 1) {
-              const activeName = scoreArr.length ? scoreArr[scoreArr.length - 1].inning : null;
-              const matchInn = sc.find(inn => {
-                if (!activeName) return false;
-                const n1 = String(inn.inning || inn.name || "").toLowerCase().trim();
-                const n2 = String(activeName).toLowerCase().trim();
-                return n1 === n2 || n1.includes(n2) || n2.includes(n1);
-              });
-              const hasStriker = sc.find(inn => (inn.batting || []).some(b => b.strike === 1 || b.strike === "1" || b.strike === true || String(b.batsman?.name || b.name || "").includes("*")));
-              
-              if (matchInn) {
-                curInn = matchInn;
-              } else if (hasStriker) {
-                curInn = hasStriker;
-              } else {
-                const getWkts = (inn) => (inn.batting || []).filter(b => b.dismissal && !["not out", "retired hurt", "retired ill"].includes(b.dismissal.toLowerCase())).length;
-                const incomplete = sc.filter(inn => getWkts(inn) < 10);
-                if (incomplete.length > 0) curInn = incomplete[incomplete.length - 1];
+            // Pick the ACTIVE innings — not blindly sc[last].
+            // Strategy:
+            // 1. Find the last entry in scoreArr that has actual activity (runs/overs/wickets)
+            // 2. Resolve that score's team to an innings in sc (using resolveInningKey)
+            // 3. Fallback: innings with a designated striker (*)
+            // 4. Fallback: last innings with < 10 wickets
+            let curInn = null;
+
+            // 1 & 2: Match against scoreArr activity
+            if (scoreArr.length > 0) {
+              // Start from the latest score and work backwards to find one that has started
+              for (let i = scoreArr.length - 1; i >= 0; i--) {
+                const s = scoreArr[i];
+                const hasStarted = (s.r || 0) > 0 || (s.w || 0) > 0 || (s.o || 0) > 0;
+                // If it's the very first innings, we use it even if 0/0
+                if (hasStarted || i === 0) {
+                  const sKey = resolveInningKey(s.inning, activeMatchData);
+                  curInn = sc.find(inn => {
+                    const iKey = resolveInningKey(inn.inning || inn.name, activeMatchData);
+                    return iKey && iKey === sKey;
+                  });
+                  if (curInn) break;
+                }
               }
             }
-            if (curInn.batting) {
+
+            // Fallback 3: Search for striker symbol
+            if (!curInn) {
+              curInn = sc.find((inn) =>
+                (inn.batting || []).some(
+                  (b) =>
+                    b.strike === 1 ||
+                    b.strike === "1" ||
+                    b.strike === true ||
+                    String(b.batsman?.name || b.name || "").includes("*"),
+                ),
+              );
+            }
+
+            // Fallback 4: Last incomplete
+            if (!curInn) {
+              const getWkts = (inn) =>
+                (inn.batting || []).filter(
+                  (b) =>
+                    b.dismissal &&
+                    !["not out", "retired hurt", "retired ill"].includes(
+                      b.dismissal.toLowerCase(),
+                    ),
+                ).length;
+              const incomplete = sc.filter((inn) => getWkts(inn) < 10);
+              curInn = incomplete.length > 0 ? incomplete[incomplete.length - 1] : sc[sc.length - 1];
+            }
+
+            if (curInn && curInn.batting) {
               const notOutBatsmen = curInn.batting.filter(
                 (b) =>
                   !b.dismissal ||
@@ -10527,14 +10583,30 @@
         const s2 = getScoreString(t2Key, pillScores, scores, match);
         const shortLabel = match.label ? match.label.split(",")[0] : "";
 
+        // Find the "actually live" innings score (last one with activity)
+        let activeScore = scores.length > 0 ? scores[scores.length - 1] : null;
+        if (isLive && scores.length > 1) {
+          for (let i = scores.length - 1; i >= 0; i--) {
+            const s = scores[i];
+            const hasActivity = (s.r || 0) > 0 || (s.w || 0) > 0 || (s.o || 0) > 0;
+            if (hasActivity || i === 0) {
+              activeScore = s;
+              break;
+            }
+          }
+        }
+        const curInnKey = activeScore ? resolveInningKey(activeScore.inning, match) : null;
+        const t1Live = isLive && curInnKey === t1Key;
+        const t2Live = isLive && curInnKey === t2Key;
+
         return `<div class="score-pill" id="scorePill">
-  <div class="sp-team">
+  <div class="sp-team ${t1Live ? "is-batting" : ""}">
     ${t1Img ? `<img loading="lazy" decoding="async" src="${escAttr(t1Img)}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${escHtml(t1Name)}</span>
     <span class="sp-score" id="sp-score-t1">${s1 || ""}</span>
   </div>
   <span class="sp-vs">vs</span>
-  <div class="sp-team">
+  <div class="sp-team ${t2Live ? "is-batting" : ""}">
     ${t2Img ? `<img loading="lazy" decoding="async" src="${escAttr(t2Img)}" class="sp-logo" onerror="this.style.display='none'">` : ""}
     <span class="sp-abbr">${escHtml(t2Name)}</span>
     <span class="sp-score" id="sp-score-t2">${s2 || ""}</span>
