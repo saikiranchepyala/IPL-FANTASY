@@ -6635,6 +6635,11 @@
         });
         const nlKeys = Object.keys(nl);
 
+        const batAcc = {},
+          bowlAcc = {},
+          catchAcc = {};
+        const statsUpdate = {};
+
         sc.forEach((inn) => {
           (inn.batting || []).forEach((b) => {
             const m = robustMatch(b.batsman?.name || b.name || "", pool, nl, nlKeys);
@@ -9580,7 +9585,7 @@
 
           if (starters.length >= 11) {
             apiPlayers.forEach((p) => {
-              const m = robustMatch(p.name, pool, nl, nlKeys);
+              const m = robustMatch(p.name, matchPlayers, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
               const isStarter = p.status === "playing";
@@ -9631,7 +9636,7 @@
 
             if (xiFromScorecard.size >= 11 || (anyBallBowled && xiFromScorecard.size > 0)) {
               xiFromScorecard.forEach((rawName) => {
-                const m = robustMatch(rawName, pool, nl, nlKeys);
+                const m = robustMatch(rawName, matchPlayers, nl, nlKeys);
                 if (!m) return;
                 const n = nl[m];
                 const currentStatus = activeMatchData?.playerStatus?.[n];
@@ -9758,7 +9763,7 @@
           sc.forEach((inn) => {
             (inn.batting || []).forEach((b) => {
               const raw = (b.batsman?.name || b.name || "").trim();
-              const m = robustMatch(raw, pool, nl, nlKeys);
+              const m = robustMatch(raw, matchPlayers, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
 
@@ -9802,7 +9807,7 @@
             });
             (inn.bowling || []).forEach((bw) => {
               const raw = (bw.bowler?.name || bw.name || "").trim();
-              const m = robustMatch(raw, pool, nl, nlKeys);
+              const m = robustMatch(raw, matchPlayers, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
               if (!bowlAcc[n])
@@ -9829,7 +9834,7 @@
               // 1. Check Catcher for Catches/Stumpings/Runouts
               if (c.catcher?.name) {
                 const rawC = c.catcher.name.trim();
-                const mC = robustMatch(rawC, pool, nl, nlKeys);
+                const mC = robustMatch(rawC, matchPlayers, nl, nlKeys);
                 if (mC) {
                   const nC = nl[mC];
                   if (!catchAcc[nC])
@@ -9846,7 +9851,7 @@
               // 2. Check Bowler for LBW/Bowled points
               if (c.bowler?.name && (c.lbw || c.bowled)) {
                 const rawB = c.bowler.name.trim();
-                const mB = robustMatch(rawB, pool, nl, nlKeys);
+                const mB = robustMatch(rawB, matchPlayers, nl, nlKeys);
                 if (mB) {
                   const nB = nl[mB];
                   if (!bowlAcc[nB])
@@ -9879,7 +9884,7 @@
             const inningsCount = sc.filter((inn) =>
               (inn.bowling || []).some((bw) => {
                 const raw = (bw.bowler?.name || bw.name || "").toLowerCase();
-                const m = robustMatch(raw, pool, nl, nlKeys);
+                const m = robustMatch(raw, matchPlayers, nl, nlKeys);
                 return m && nl[m] === n;
               }),
             ).length;
