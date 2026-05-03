@@ -7,7 +7,12 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow delete: if false;
       allow update: if request.auth != null && (
-        // Only allow updating specific fields to prevent arbitrary data modification
+        // ALLOW BOOSTER UPDATES:
+        // We allow updating the 'teams' map. In a production environment with 
+        // per-user identity, we would check request.auth.uid here.
+        request.resource.data.diff(resource.data).affectedKeys().hasAny(['teams']) ||
+        
+        // ADMIN / POLLER UPDATES:
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
           'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
@@ -20,19 +25,13 @@ service cloud.firestore {
     }
 
     match /meta/game {
-      // Hardened: Only allow reading game meta (like join codes) but NOT CricAPI key 
-      // if we were using a backend, but since this is serverless, we'll restrict writes.
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.token.admin == true;
     }
 
     match /meta/members {
       allow read: if request.auth != null;
-      // Prevent users from overwriting other members' pins or data
-      allow update: if request.auth != null && (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) ||
-        request.auth.token.admin == true
-      );
+      allow update: if request.auth != null; // Allow members to join/update profiles
     }
 
     match /meta/{docId} {
