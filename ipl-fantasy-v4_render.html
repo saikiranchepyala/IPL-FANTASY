@@ -10912,6 +10912,26 @@
       } else {
         initTheme();
       }
+
+      // ── Background Hibernation (Data Pollers) ──
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          // Tab hidden: pause background data fetching
+          if (window._tickerInterval) { clearInterval(window._tickerInterval); window._tickerInterval = null; }
+          if (arIntervalTimer) { stopAR(); }
+          console.log("[System] Data pollers hibernated.");
+        } else {
+          // Tab visible: resume
+          _startTickerIfNeeded();
+          // Note: AR only resumes if admin explicitly had it on — keep existing toggle state
+          if (window._arStoredSecs) {
+            const el = document.getElementById("arIntervalInp") || document.getElementById("arInterval");
+            const val = parseInt(el?.value || window._arStoredSecs);
+            if (!isNaN(val) && val > 0) startAR(val);
+          }
+          console.log("[System] Data pollers resumed.");
+        }
+      });
     </script>
     <style>
             /* ═══════════════════════════════════════════════════════
@@ -18184,23 +18204,7 @@
         );
         document.addEventListener("visibilitychange", function () {
           _spaused = document.hidden;
-          if (_spaused) {
-            // Tab hidden: pause background data fetching
-            if (_tickerInterval) { clearInterval(_tickerInterval); _tickerInterval = null; }
-            if (arIntervalTimer) { stopAR(); }
-            console.log("[System] Data pollers hibernated.");
-          } else {
-            // Tab visible: resume
-            requestAnimationFrame(_scTick);
-            _startTickerIfNeeded();
-            // Note: AR only resumes if admin explicitly had it on — keep existing toggle state
-            if (window._arStoredSecs) {
-              const el = document.getElementById("arIntervalInp") || document.getElementById("arInterval");
-              const val = parseInt(el?.value || window._arStoredSecs);
-              if (!isNaN(val) && val > 0) startAR(val);
-            }
-            console.log("[System] Data pollers resumed.");
-          }
+          if (!_spaused) requestAnimationFrame(_scTick);
         });
       })();
     </script>
