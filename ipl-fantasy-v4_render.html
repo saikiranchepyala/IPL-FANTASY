@@ -1141,12 +1141,17 @@
             signal: controller.signal
           });
           clearTimeout(timeout);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (res.status === 429) throw new Error("CricAPI quota reached (Limit: 2000/day)");
+          if (res.status === 401) throw new Error("CricAPI key invalid or expired");
+          if (res.status >= 500)  throw new Error(`CricAPI Server Error (HTTP ${res.status})`);
+          if (!res.ok)           throw new Error(`HTTP ${res.status}`);
           return await res.json();
         } catch (e) {
           clearTimeout(timeout);
           console.error(`[Fetch] Failed: ${e.message}`);
-          throw new Error("Connection failed. Check your network or try a mobile hotspot.");
+          if (e.name === "AbortError") throw new Error("Connection timed out (15s)");
+          if (e.message && (e.message.includes("CricAPI") || e.message.includes("HTTP"))) throw e;
+          throw new Error("Network error — check your internet or try a mobile hotspot.");
         }
       }
       let playerStatus = {}; // { playerName: 'playing'|'notplaying'|'impact' }
@@ -1228,6 +1233,14 @@
 
       // ── Boot ──
       async function boot() {
+        // --- MOBILE PERFORMANCE OPTIMIZATION ---
+        if (window.innerWidth < 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+          document.documentElement.classList.add("mobile-perf-optimized");
+        }
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("reduced-motion");
+        }
+
         urlJoinCode = new URLSearchParams(location.search).get("join");
         if (FIREBASE_CONFIG.apiKey === "REPLACE_apiKey") {
           showConfigError();
@@ -1491,7 +1504,9 @@
       }
       function refreshView() {
         if (_refreshTimer) clearTimeout(_refreshTimer);
-        _refreshTimer = setTimeout(_doRefresh, 80);
+        // Increase debounce on mobile to reduce DOM thrashing
+        const delay = window.innerWidth < 768 ? 120 : 80;
+        _refreshTimer = setTimeout(_doRefresh, delay);
       }
       function trySurgicalUpdate() {
         const mid = getActiveMid();
@@ -11571,6 +11586,9 @@
               max-width: 1200px;
               margin: 0 auto;
               padding: 0 16px 80px;
+              /* GPU hint for smoother scrolling on iOS */
+              will-change: transform;
+              -webkit-overflow-scrolling: touch;
             }
             .blob,
             .blob2 {
@@ -12538,6 +12556,31 @@
             }
             .vtab:hover:not(.active) {
               color: var(--text);
+            }
+
+            .sc-card, .lb-card, .acard, .stat-card, .hsc-inn {
+              content-visibility: auto;
+              contain-intrinsic-size: 100px 200px;
+            }
+
+            /* ── GLOBAL PERFORMANCE OVERRIDES ── */
+            .mobile-perf-optimized * {
+              backdrop-filter: none !important;
+              -webkit-backdrop-filter: none !important;
+              box-shadow: none !important;
+              text-shadow: none !important;
+            }
+            /* Re-enable very subtle shadows for depth where essential, but keep them flat */
+            .mobile-perf-optimized .sc-card, 
+            .mobile-perf-optimized .lb-card, 
+            .mobile-perf-optimized .acard {
+              box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+            }
+            .reduced-motion * {
+              animation-duration: 0.01ms !important;
+              animation-iteration-count: 1 !important;
+              transition-duration: 0.01ms !important;
+              scroll-behavior: auto !important;
             }
 
             /* ═══════════════════════════════════════════
@@ -18141,7 +18184,23 @@
         );
         document.addEventListener("visibilitychange", function () {
           _spaused = document.hidden;
-          if (!_spaused) requestAnimationFrame(_scTick);
+          if (_spaused) {
+            // Tab hidden: pause background data fetching
+            if (_tickerInterval) { clearInterval(_tickerInterval); _tickerInterval = null; }
+            if (arIntervalTimer) { stopAR(); }
+            console.log("[System] Data pollers hibernated.");
+          } else {
+            // Tab visible: resume
+            requestAnimationFrame(_scTick);
+            _startTickerIfNeeded();
+            // Note: AR only resumes if admin explicitly had it on — keep existing toggle state
+            if (window._arStoredSecs) {
+              const el = document.getElementById("arIntervalInp") || document.getElementById("arInterval");
+              const val = parseInt(el?.value || window._arStoredSecs);
+              if (!isNaN(val) && val > 0) startAR(val);
+            }
+            console.log("[System] Data pollers resumed.");
+          }
         });
       })();
     </script>
