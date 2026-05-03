@@ -161,6 +161,53 @@
         if (statsUpdateObj) statsUpdateObj[`stats.${n}.playingXI`] = true;
       };
 
+      /**
+       * Robust name matching engine (Unified v4.2)
+       * Logic: 
+       * 1. Direct hit (exact name or altname)
+       * 2. Ultra-strict word match (every meaningful word must exist)
+       * 3. Initials fallback (V Kohli -> Virat Kohli) IF no other candidate exists
+       */
+      const robustMatch = (raw, pool, nl, nlKeys) => {
+        if (!raw) return null;
+        const clean = raw
+          .toLowerCase()
+          .replace(/\(c\)|\(wk\)|\(sub\)|\(impact\)|sub|impact|batting|not out/gi, "")
+          .replace(/[^a-z\s]/g, "")
+          .trim();
+        if (!clean) return null;
+        if (nl[clean]) return clean;
+
+        // 2. ULTRA STRICT Match
+        const hit = nlKeys.find((k) => {
+          const poolWords = k.split(/\s+/);
+          const apiWords = clean.split(/\s+/);
+          const meaningfulApi = apiWords.filter((w) => w.length > 2);
+          if (meaningfulApi.length === 0) return k === clean;
+          const allMatch = meaningfulApi.every((word) => poolWords.includes(word));
+          if (!allMatch) return false;
+          if (meaningfulApi.length === 1 && poolWords.length > 1) return false;
+          return true;
+        });
+        if (hit) return hit;
+
+        // 3. Initials Fallback (S Sharma -> Sandeep Sharma)
+        const parts = clean.split(/\s+/);
+        if (parts.length >= 2) {
+          const fi = parts[0][0], last = parts[parts.length - 1];
+          const candidates = nlKeys.filter((k) => {
+            const kp = k.split(/\s+/);
+            return kp.length >= 2 && kp[0][0] === fi && kp[kp.length - 1] === last;
+          });
+          // ONLY match initials if there's exactly one candidate (prevents S Sharma collisions)
+          if (candidates.length === 1) return candidates[0];
+          if (candidates.length > 1) {
+            console.warn(`[robustMatch] Initials collision: "${raw}" matched ${candidates.length} players. Skipping fallback.`);
+          }
+        }
+        return null;
+      };
+
       function resolveTeamKey(teamName) {
         if (!teamName) return "";
         // CricAPI sometimes returns multi-team inning labels like
@@ -6588,56 +6635,9 @@
         });
         const nlKeys = Object.keys(nl);
 
-        function robustMatch(name) {
-          if (!name) return null;
-          const clean = name
-            .toLowerCase()
-            .replace(/\(c\)|\(wk\)|\(sub\)|\(impact\)|sub|impact|batting|not out/gi, "")
-            .replace(/[^a-z\s]/g, "")
-            .trim();
-          if (!clean) return null;
-          if (nl[clean]) return clean;
-
-          // ULTRA STRICT MATCH: prevents incorrect player mapping
-          const hit = nlKeys.find((k) => {
-            const poolWords = k.split(/\s+/);
-            const apiWords = clean.split(/\s+/);
-            const meaningfulApi = apiWords.filter((w) => w.length > 2);
-            if (meaningfulApi.length === 0) return k === clean;
-
-            // 1. Every meaningful word from API must be in the pool name
-            const allMatch = meaningfulApi.every((word) => poolWords.includes(word));
-            if (!allMatch) return false;
-
-            // 2. If it's a single word match, it MUST be an exact match
-            if (meaningfulApi.length === 1 && poolWords.length > 1) {
-              return false;
-            }
-            return true;
-          });
-          if (hit) return hit;
-
-          const parts = clean.split(/\s+/);
-          if (parts.length >= 2) {
-            const fi = parts[0][0],
-              last = parts[parts.length - 1];
-            const ih = nlKeys.find((k) => {
-              const kp = k.split(/\s+/);
-              return kp.length >= 2 && kp[0][0] === fi && kp[kp.length - 1] === last;
-            });
-            if (ih) return ih;
-          }
-          return null;
-        }
-
-        const batAcc = {},
-          bowlAcc = {},
-          catchAcc = {};
-        const statsUpdate = {};
-
         sc.forEach((inn) => {
           (inn.batting || []).forEach((b) => {
-            const m = robustMatch(b.batsman?.name || b.name || "");
+            const m = robustMatch(b.batsman?.name || b.name || "", pool, nl, nlKeys);
             if (!m) return;
             const n = nl[m];
             const balls = b.b || 0,
@@ -6665,7 +6665,7 @@
             batAcc[n].notOut = !dismissed;
           });
           (inn.bowling || []).forEach((bw) => {
-            const m = robustMatch(bw.bowler?.name || bw.name || "");
+            const m = robustMatch(bw.bowler?.name || bw.name || "", pool, nl, nlKeys);
             if (!m) return;
             const n = nl[m];
             if (!bowlAcc[n])
@@ -6689,7 +6689,7 @@
           });
           (inn.catching || []).forEach((c) => {
             if (c.catcher?.name) {
-              const mC = robustMatch(c.catcher.name);
+              const mC = robustMatch(c.catcher.name, pool, nl, nlKeys);
               if (mC) {
                 const nC = nl[mC];
                 if (!catchAcc[nC])
@@ -6704,7 +6704,7 @@
               }
             }
             if (c.bowler?.name && (c.lbw || c.bowled)) {
-              const mB = robustMatch(c.bowler.name);
+              const mB = robustMatch(c.bowler.name, pool, nl, nlKeys);
               if (mB) {
                 const nB = nl[mB];
                 if (!bowlAcc[nB])
@@ -9561,59 +9561,6 @@
           });
           const nlKeys = Object.keys(nl);
 
-          const robustMatch = (raw) => {
-            if (!raw) return null;
-            // Strip common suffixes: (c), (wk), (sub), (impact), "sub", "impact", "batting", "not out"
-            const clean = raw
-              .toLowerCase()
-              .replace(
-                /\(c\)|\(wk\)|\(sub\)|\(impact\)|sub|impact|batting|not out/gi,
-                "",
-              )
-              .replace(/[^a-z\s]/g, "")
-              .trim();
-            if (!clean) return null;
-            if (nl[clean]) return clean;
-
-            // ULTRA STRICT MATCH: Required for IPL 2026 to prevent incorrect player mapping (e.g. De Kock -> Shreyas)
-            const hit = nlKeys.find((k) => {
-              const poolWords = k.split(/\s+/);
-              const apiWords = clean.split(/\s+/);
-              // meaningful: words like "Quinton", "Kock", "Shreyas", "Iyer" (skip "de", "v", "s")
-              const meaningfulApi = apiWords.filter((w) => w.length > 2);
-              if (meaningfulApi.length === 0) return k === clean;
-
-              // 1. Every meaningful word from API must be in the pool name
-              const allMatch = meaningfulApi.every((word) =>
-                poolWords.includes(word),
-              );
-              if (!allMatch) return false;
-
-              // 2. If it's a single word match, it MUST be an exact match (prevents generic surname collisions)
-              if (meaningfulApi.length === 1 && poolWords.length > 1) {
-                return false;
-              }
-              return true;
-            });
-            if (hit) return hit;
-
-            const parts = clean.split(/\s+/);
-            if (parts.length >= 2) {
-              const fi = parts[0][0],
-                last = parts[parts.length - 1];
-              const initHit = nlKeys.find((k) => {
-                const kp = k.split(/\s+/);
-                return (
-                  kp.length >= 2 &&
-                  kp[0][0] === fi &&
-                  kp[kp.length - 1] === last
-                );
-              });
-              if (initHit) return initHit;
-            }
-            return null;
-          };
-
           // 2. TOSS RESOLVER: Map Full Name to Short Name
           const rawToss = scData.data?.tossWinner || "";
           if (rawToss && !activeMatchData?.tossResult) {
@@ -9633,7 +9580,7 @@
 
           if (starters.length >= 11) {
             apiPlayers.forEach((p) => {
-              const m = robustMatch(p.name);
+              const m = robustMatch(p.name, pool, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
               const isStarter = p.status === "playing";
@@ -9684,7 +9631,7 @@
 
             if (xiFromScorecard.size >= 11 || (anyBallBowled && xiFromScorecard.size > 0)) {
               xiFromScorecard.forEach((rawName) => {
-                const m = robustMatch(rawName);
+                const m = robustMatch(rawName, pool, nl, nlKeys);
                 if (!m) return;
                 const n = nl[m];
                 const currentStatus = activeMatchData?.playerStatus?.[n];
@@ -9811,7 +9758,7 @@
           sc.forEach((inn) => {
             (inn.batting || []).forEach((b) => {
               const raw = (b.batsman?.name || b.name || "").trim();
-              const m = robustMatch(raw);
+              const m = robustMatch(raw, pool, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
 
@@ -9855,7 +9802,7 @@
             });
             (inn.bowling || []).forEach((bw) => {
               const raw = (bw.bowler?.name || bw.name || "").trim();
-              const m = robustMatch(raw);
+              const m = robustMatch(raw, pool, nl, nlKeys);
               if (!m) return;
               const n = nl[m];
               if (!bowlAcc[n])
@@ -9882,7 +9829,7 @@
               // 1. Check Catcher for Catches/Stumpings/Runouts
               if (c.catcher?.name) {
                 const rawC = c.catcher.name.trim();
-                const mC = robustMatch(rawC);
+                const mC = robustMatch(rawC, pool, nl, nlKeys);
                 if (mC) {
                   const nC = nl[mC];
                   if (!catchAcc[nC])
@@ -9899,7 +9846,7 @@
               // 2. Check Bowler for LBW/Bowled points
               if (c.bowler?.name && (c.lbw || c.bowled)) {
                 const rawB = c.bowler.name.trim();
-                const mB = robustMatch(rawB);
+                const mB = robustMatch(rawB, pool, nl, nlKeys);
                 if (mB) {
                   const nB = nl[mB];
                   if (!bowlAcc[nB])
@@ -9932,7 +9879,7 @@
             const inningsCount = sc.filter((inn) =>
               (inn.bowling || []).some((bw) => {
                 const raw = (bw.bowler?.name || bw.name || "").toLowerCase();
-                const m = robustMatch(raw);
+                const m = robustMatch(raw, pool, nl, nlKeys);
                 return m && nl[m] === n;
               }),
             ).length;
