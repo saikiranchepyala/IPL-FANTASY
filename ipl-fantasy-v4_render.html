@@ -151,6 +151,16 @@
         GT: "https://scores.iplt20.com/ipl/teamlogos/GT.png",
       };
 
+      const safeSetPlayingXI = (n, matchData, statsUpdateObj) => {
+        if (!n) return;
+        const currentStatus = (matchData?.playerStatus || {})[n];
+        // Do not flip back to playingXI=true if they were substituted out or marked as impact later
+        if (currentStatus === "impact" || currentStatus === "notplaying") return;
+        if (!playerStats[n]) playerStats[n] = {};
+        playerStats[n].playingXI = true;
+        if (statsUpdateObj) statsUpdateObj[`stats.${n}.playingXI`] = true;
+      };
+
       function resolveTeamKey(teamName) {
         if (!teamName) return "";
         // CricAPI sometimes returns multi-team inning labels like
@@ -6197,19 +6207,11 @@
           return null;
         };
 
-        const safeSetPlayingXI = (n) => {
-          if (!n) return;
-          const currentStatus = (activeMatchData?.playerStatus || {})[n];
-          // Do not flip back to playingXI=true if they were substituted out or marked as impact later
-          if (currentStatus === "impact" || currentStatus === "notplaying") return;
-          if (!playerStats[n]) playerStats[n] = {};
-          playerStats[n].playingXI = true;
-          statsUpdate[`stats.${n}.playingXI`] = true;
-        };
-
         const initStat = function (name) {
           if (!playerStats[name]) playerStats[name] = {};
-          safeSetPlayingXI(name);
+          // Use current match data from getMatch if available
+          const activeMatchData = getMatch(getActiveMid());
+          safeSetPlayingXI(name, activeMatchData);
           return playerStats[name];
         };
 
@@ -6351,7 +6353,8 @@
           if (bowlMatch && numGroups >= 6 && !hasBatKeywords) {
             var bp = findMatch(bowlMatch[1]);
             if (bp) {
-              safeSetPlayingXI(bp.name);
+              const activeMatchData = getMatch(getActiveMid());
+              safeSetPlayingXI(bp.name, activeMatchData);
               var ov = parseFloat(bowlMatch[2]) || 0;
               // Normalise cricket overs notation: 1.6 → 2.0, 3.7 → 4.1 etc.
               if (parseFloat((ov % 1).toFixed(1)) >= 0.6) {
@@ -6770,7 +6773,8 @@
             playerStats[n].runOutIndirect = s.runOutIndirect;
             statsUpdate[`stats.${n}.runOutIndirect`] = s.runOutIndirect;
           }
-          safeSetPlayingXI(n);
+          const activeMatchData = getMatch(getActiveMid());
+          safeSetPlayingXI(n, activeMatchData);
           updated++;
         });
 
