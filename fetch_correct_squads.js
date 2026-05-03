@@ -1,7 +1,7 @@
 const fs = require('fs');
 const http = require('https');
 
-const API_KEY = "a311eeb5-0c69-45c5-bbc7-0cc35d781b0e";
+const API_KEY = process.env.CRICAPI_KEY;
 const SERIES_ID = "87c62aac-bc3c-4738-ab93-19da0690488f"; // IPL 2026
 
 http.get(`https://api.cricapi.com/v1/series_squad?apikey=${API_KEY}&id=${SERIES_ID}`, (res) => {

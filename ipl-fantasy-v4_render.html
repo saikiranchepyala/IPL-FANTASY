@@ -3192,7 +3192,7 @@
             <div class="hsc-inn lsv-inn" style="--inn-col:${col}">
               <div class="hsc-inn-hd">
                 <div class="hsc-inn-left">
-                  ${img?`<img loading="lazy" decoding="async" src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
+                  ${img?`<img loading="lazy" decoding="async" src="${escAttr(img)}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
                   <span class="hsc-inn-team">${label}</span>
                   ${isCurrentInn?'<span class="lsv-live-badge">LIVE</span>':""}
                 </div>
@@ -4111,7 +4111,7 @@
             <div class="hsc-inn" style="--inn-col:${col}">
               <div class="hsc-inn-hd">
                 <div class="hsc-inn-left">
-                  ${img ? `<img loading="lazy" decoding="async" src="${img}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
+                  ${img ? `<img loading="lazy" decoding="async" src="${escAttr(img)}" class="hsc-inn-logo" onerror="this.style.display='none'">` : ""}
                   <span class="hsc-inn-team">${label}</span>
                 </div>
                 ${
@@ -6197,9 +6197,19 @@
           return null;
         };
 
+        const safeSetPlayingXI = (n) => {
+          if (!n) return;
+          const currentStatus = (activeMatchData?.playerStatus || {})[n];
+          // Do not flip back to playingXI=true if they were substituted out or marked as impact later
+          if (currentStatus === "impact" || currentStatus === "notplaying") return;
+          if (!playerStats[n]) playerStats[n] = {};
+          playerStats[n].playingXI = true;
+          statsUpdate[`stats.${n}.playingXI`] = true;
+        };
+
         const initStat = function (name) {
           if (!playerStats[name]) playerStats[name] = {};
-          playerStats[name].playingXI = true;
+          safeSetPlayingXI(name);
           return playerStats[name];
         };
 
@@ -6341,8 +6351,7 @@
           if (bowlMatch && numGroups >= 6 && !hasBatKeywords) {
             var bp = findMatch(bowlMatch[1]);
             if (bp) {
-              if (!playerStats[bp.name]) playerStats[bp.name] = {};
-              playerStats[bp.name].playingXI = true;
+              safeSetPlayingXI(bp.name);
               var ov = parseFloat(bowlMatch[2]) || 0;
               // Normalise cricket overs notation: 1.6 → 2.0, 3.7 → 4.1 etc.
               if (parseFloat((ov % 1).toFixed(1)) >= 0.6) {
@@ -6761,7 +6770,7 @@
             playerStats[n].runOutIndirect = s.runOutIndirect;
             statsUpdate[`stats.${n}.runOutIndirect`] = s.runOutIndirect;
           }
-          statsUpdate[`stats.${n}.playingXI`] = true;
+          safeSetPlayingXI(n);
           updated++;
         });
 
@@ -6930,8 +6939,9 @@
       <div class="sc-card ${i === 0 ? "sc-first" : ""}">
         <div class="sc-rank">${medals[i] || "#" + (i + 1)}</div>
         <div class="sc-body">
-          <div class="sc-name">${r.name}</div>
-          <div class="sc-tname">${r.teamName}</div>
+          <div class="sc-name">${escHtml(r.name)}</div>
+          <div class="sc-tname">${escHtml(r.teamName)}</div>
+
           <div class="sc-history">
             ${
               r.matches.length
@@ -6967,7 +6977,8 @@
           <tbody>${rows
             .map(
               (r) =>
-                `<tr><td class="td-name">${r.name}</td>${allMatchCols
+                `<tr><td class="td-name">${escHtml(r.name)}</td>${allMatchCols
+
                   .map((id) => {
                     const m = r.matches.find((x) => x.matchId === id);
                     return `<td class="td-pts">${m ? m.pts : "–"}</td>`;
@@ -8662,7 +8673,7 @@
             .slice(0, 5)
             .map((s) => s.name)
             .join(", ");
-          list.innerHTML = `<div class="ss-result-label">Results for: <em>${seriesNames}</em></div>`;
+          list.innerHTML = `<div class="ss-result-label">Results for: <em>${escHtml(seriesNames)}</em></div>`;
           renderMatchList(matches, list, key, _matchType === "ipl", true);
         } catch (e) {
           list.innerHTML = `<p style="color:var(--red);font-size:13px">${escHtml(e.message)}</p>`;
@@ -9434,6 +9445,13 @@
           if (showFeedback) toast("Match data not loaded yet — try again in a moment", "err");
           return;
         }
+
+        // Guard: Do not poll or write to finalized matches
+        if (activeMatchData.finalized) {
+          console.log(`[autoFetchStats] Skipping ${activeMid} — match already finalized`);
+          return;
+        }
+
         const mid = activeMatchData?.liveMatchId;
 
         if (!mid) {
@@ -9454,7 +9472,10 @@
               `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
             );
             if (infoFallback.status === "success") {
+              // Track quota used only for successful (or at least attempted/connected) calls
+              _trackApiCall(); 
               const fbScore  = infoFallback.data?.score   || [];
+
               const fbStatus = infoFallback.data?.status  || "";
               const fbPlayers = infoFallback.data?.players || [];
               const fbUpdate = {};
@@ -9494,7 +9515,11 @@
             return;
           }
 
+          // Track quota used only for successful calls
+          _trackApiCall();
+
           const started = scData.data?.matchStarted;
+
           let ended = scData.data?.matchEnded;
           const apiPlayers = scData.data?.players || [];
 
@@ -10128,7 +10153,7 @@
             started &&
             !activeMatchData?.locked &&
             !activeMatchData?.finalized &&
-            sc.some((inn) => (inn.batting || []).length > 0)
+            (sc.some((inn) => (inn.batting || []).some(b => (b.b || 0) > 0)) || hasLiveScorecard)
           ) {
             const lockUp = { locked: true };
             if (!activeMatchData?.revealed) lockUp.revealed = true;
@@ -10404,10 +10429,11 @@
         session.isAdmin && metaGame.adminProfile?.name
           ? `
         <div class="mode-toggle-wrap">
-          <button class="mode-toggle-btn ${adminInPlayerMode ? "mtb-admin" : "mtb-player"}" id="modeToggleBtn" title="${adminInPlayerMode ? "Back to Admin Panel" : "Switch to " + metaGame.adminProfile.name + " (player)"}">
-            ${adminInPlayerMode ? '<span class="mtb-icon">⚙️</span> Admin' : '<span class="mtb-icon">👤</span> ' + metaGame.adminProfile.name}
-          </button>
+         <button class="mode-toggle-btn ${adminInPlayerMode ? "mtb-admin" : "mtb-player"}" id="modeToggleBtn" title="${adminInPlayerMode ? "Back to Admin Panel" : "Switch to " + escAttr(metaGame.adminProfile.name) + " (player)"}">
+           ${adminInPlayerMode ? '<span class="mtb-icon">⚙️</span> Admin' : '<span class="mtb-icon">👤</span> ' + escHtml(metaGame.adminProfile.name)}
+         </button>
         </div>`
+
           : ""
       }
       ${!adminInPlayerMode ? `<button class="btn-ghost btn-signout" id="logoutBtn">Sign out</button>` : ""}

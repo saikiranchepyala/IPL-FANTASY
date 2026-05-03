@@ -1,5 +1,11 @@
+node_modules/
 .DS_Store
 .idea/
-node_modules/
-*.log
-.env*
+test-results.log
+si.js
+stats_chunk.js
+temp_stats.html
+temp_*.html
+Squad_Review.md
+Corrected_Squad_Review.md
+skillipl.md
