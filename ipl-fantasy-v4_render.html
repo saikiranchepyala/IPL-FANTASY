@@ -6286,12 +6286,12 @@
           /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+|0\.00|-)$/;
 
         // ── PHASE 1: DISCOVERY SCAN ──
-        var battersInPaste = new Set();
-        var bowlersInPaste = new Set();
-        var fieldersInPaste = new Set();
+        let battersInPaste = new Set();
+        let bowlersInPaste = new Set();
+        let fieldersInPaste = new Set();
 
         lines.forEach(function (line) {
-          var ll = line.toLowerCase();
+          let ll = line.toLowerCase();
           if (
             /\b(bowler|bowling|batter|batting)\b/.test(ll) &&
             line.trim().split(/\s+/).length <= 8 &&
@@ -6299,49 +6299,49 @@
           )
             return;
 
-          var bwScan = BOWL_RE.exec(line);
+          let bwScan = BOWL_RE.exec(line);
           const hasBatKeywordsScan =
             /\b(batting|not out|lbw|run out)\b/i.test(line) ||
             /\s+c\s+|\s+b\s+/i.test(line);
 
           if (bwScan && !hasBatKeywordsScan) {
-            var p = findMatch(bwScan[1]);
+            let p = findMatch(bwScan[1]);
             if (p) bowlersInPaste.add(p.name);
             return;
           }
 
-          var btScan = BAT_RE.exec(line);
+          let btScan = BAT_RE.exec(line);
           if (btScan) {
-            var fullName = btScan[1];
-            var batterName = fullName
+            let fullName = btScan[1];
+            let batterName = fullName
               .split(
                 /(?:\s+c\s+|\s+b\s+|\s+lbw\s+|\s+st\s+|\s+run\s+out|\s+not\s+out|\s+\(c\)|\s+\(wk\))/i,
               )[0]
               .trim();
-            var bp = findMatch(batterName);
+            let bp = findMatch(batterName);
             if (bp) battersInPaste.add(bp.name);
 
-            var dis = fullName.toLowerCase();
-            var dm;
+            let dis = fullName.toLowerCase();
+            let dm;
             dm = dis.match(/c\s+(?:&|and)\s+b\s+(.+)/i);
             if (dm) {
-              var fx = findMatch(dm[1]);
+              let fx = findMatch(dm[1]);
               if (fx) fieldersInPaste.add(fx.name);
             }
             dm = dis.match(/c\s+(.+?)\s+b\s+/i);
             if (dm) {
-              var fy = findMatch(dm[1]);
+              let fy = findMatch(dm[1]);
               if (fy) fieldersInPaste.add(fy.name);
             }
             dm = dis.match(/st\s+(.+?)\s+b\s+/i);
             if (dm) {
-              var fz = findMatch(dm[1]);
+              let fz = findMatch(dm[1]);
               if (fz) fieldersInPaste.add(fz.name);
             }
             dm = dis.match(/run\s+out\s+\((.+?)\)/i);
             if (dm) {
               dm[1].split(/[/+&]|and/i).forEach(function (rf) {
-                var fw = findMatch(rf.trim());
+                let fw = findMatch(rf.trim());
                 if (fw) fieldersInPaste.add(fw.name);
               });
             }
@@ -6350,7 +6350,7 @@
 
         // ── PHASE 2: SELECTIVE RESET ──
         pool.forEach(function (p) {
-          var n = p.name;
+          let n = p.name;
           if (
             !battersInPaste.has(n) &&
             !bowlersInPaste.has(n) &&
@@ -6395,7 +6395,7 @@
 
         // ── PHASE 3: REGEX-FIRST PARSE ──
         lines.forEach(function (line) {
-          var ll = line.toLowerCase();
+          let ll = line.toLowerCase();
           if (
             /\b(bowler|bowling|batter|batting)\b/.test(ll) &&
             line.trim().split(/\s+/).length <= 8 &&
@@ -6411,17 +6411,17 @@
             /\b(batting|not out|lbw|run out)\b/i.test(line) ||
             /\s+c\s+.+\s+b\s+/i.test(line);
 
-          var bowlMatch = BOWL_RE.exec(line);
+          let bowlMatch = BOWL_RE.exec(line);
           if (bowlMatch && numGroups >= 6 && !hasBatKeywords) {
-            var bp = findMatch(bowlMatch[1]);
+            let bp = findMatch(bowlMatch[1]);
             if (bp) {
               const activeMatchData = getMatch(getActiveMid());
               safeSetPlayingXI(bp.name, activeMatchData);
-              var ov = parseFloat(bowlMatch[2]) || 0;
+              let ov = parseFloat(bowlMatch[2]) || 0;
               // Normalise cricket overs notation: 1.6 → 2.0, 3.7 → 4.1 etc.
               if (parseFloat((ov % 1).toFixed(1)) >= 0.6) {
-                var full = Math.floor(ov);
-                var bb = Math.round((ov - full) * 10);
+                let full = Math.floor(ov);
+                let bb = Math.round((ov - full) * 10);
                 ov = full + Math.floor(bb / 6) + (bb % 6) / 10;
               }
               // Safety guard: No bowler bowls > 10 overs in T20
@@ -6439,19 +6439,19 @@
             return; // hard stop — do not fall through to batting check
           }
 
-          var batMatch = BAT_RE.exec(line);
+          let batMatch = BAT_RE.exec(line);
           if (batMatch) {
-            var fullName = batMatch[1];
-            var batterName = fullName
+            let fullName = batMatch[1];
+            let batterName = fullName
               .split(
                 /(?:\s+c\s+|\s+b\s+|\s+lbw\s+|\s+st\s+|\s+run\s+out|\s+not\s+out|\s+\(c\)|\s+\(wk\))/i,
               )[0]
               .trim();
-            var batp = findMatch(batterName);
-            var p = batp;
+            let batp = findMatch(batterName);
+            let p = batp;
             if (p) {
               // ONLY batting fields written — bowling fields never touched
-              var s = initStat(p.name);
+              let s = initStat(p.name);
               s.batted = true;
               s.bat_notOut = /not\s+out/i.test(fullName);
               s.bat_runs = parseInt(batMatch[2], 10) || 0;
@@ -6469,43 +6469,43 @@
               updatedCount++;
 
               // Dismissal → fielding & bowling bonuses
-              var dis = fullName.toLowerCase();
-              var m;
+              let dis = fullName.toLowerCase();
+              let m;
               m = dis.match(/c\s+(?:&|and)\s+b\s+(.+)/i);
               if (m) {
-                var bowler = findMatch(m[1]);
+                let bowler = findMatch(m[1]);
                 if (bowler) {
-                  var bs = initStat(bowler.name);
+                  let bs = initStat(bowler.name);
                   bs.catches = (bs.catches || 0) + 1;
                 }
               } else {
                 m = dis.match(/c\s+(.+?)\s+b\s+(.+)/i);
                 if (m) {
-                  var fi = findMatch(m[1]);
+                  let fi = findMatch(m[1]);
                   if (fi) {
-                    var fs = initStat(fi.name);
+                    let fs = initStat(fi.name);
                     fs.catches = (fs.catches || 0) + 1;
                   }
                 }
                 m = dis.match(/st\s+(.+?)\s+b\s+(.+)/i);
                 if (m) {
-                  var fi2 = findMatch(m[1]);
+                  let fi2 = findMatch(m[1]);
                   if (fi2) {
-                    var fs2 = initStat(fi2.name);
+                    let fs2 = initStat(fi2.name);
                     fs2.stumpings = (fs2.stumpings || 0) + 1;
                   }
                 }
-                var isLBW = dis.includes("lbw b ");
-                var isBowled =
+                let isLBW = dis.includes("lbw b ");
+                let isBowled =
                   /(?:\s|^)b\s+/.test(dis) &&
                   !dis.includes(" c ") &&
                   !dis.includes(" st ") &&
                   !dis.includes("run out");
                 if (isLBW || isBowled) {
-                  var bParts = dis.split(/\s+b\s+/);
-                  var bwl = findMatch(bParts[bParts.length - 1].trim());
+                  let bParts = dis.split(/\s+b\s+/);
+                  let bwl = findMatch(bParts[bParts.length - 1].trim());
                   if (bwl) {
-                    var bws = initStat(bwl.name);
+                    let bws = initStat(bwl.name);
                     bws.lbwBowled = (bws.lbwBowled || 0) + 1;
                   }
                 }
@@ -6513,9 +6513,9 @@
               m = dis.match(/run\s+out\s+\((.+?)\)/i);
               if (m) {
                 m[1].split(/[/+&]|and/i).forEach(function (rf) {
-                  var fielder = findMatch(rf.trim());
+                  let fielder = findMatch(rf.trim());
                   if (fielder) {
-                    var fld = initStat(fielder.name);
+                    let fld = initStat(fielder.name);
                     if (m[1].split(/[/+&]|and/i).length === 1)
                       fld.runOutDirect = (fld.runOutDirect || 0) + 1;
                     else fld.runOutIndirect = (fld.runOutIndirect || 0) + 1;
@@ -6532,16 +6532,16 @@
           return;
         }
 
-        var activeMid2 = getActiveMid();
+        let activeMid2 = getActiveMid();
         if (!activeMid2) {
           toast("Match ID lost — please reload", "err");
           return;
         }
 
         // Build Firestore payload — only write players in this paste + preserve everyone else
-        var statsUpdate2 = {};
+        let statsUpdate2 = {};
         Object.keys(playerStats).forEach(function (pName) {
-          var s = playerStats[pName];
+          let s = playerStats[pName];
           if (!s) return;
           delete s.eco; // force calcPoints to recalculate economy from overs/runsConceded
           statsUpdate2["stats." + pName] = s;
@@ -6556,10 +6556,10 @@
           })
           .then(function (snap) {
             if (!snap.exists()) return;
-            var fresh = snap.data();
+            let fresh = snap.data();
             playerStats = fresh.stats || {};
             // calcPoints runs inside renderStatsGrid for every player
-            var grid = document.getElementById("statsGrid");
+            let grid = document.getElementById("statsGrid");
             if (grid) {
               grid.innerHTML = renderStatsGrid(
                 document.getElementById("statsSearch")
@@ -6571,7 +6571,7 @@
               triggerCountUp();
             }
             toast("Parsed & saved " + updatedCount + " players! ✨");
-            var box = document.getElementById("pasteScorecardBox");
+            let box = document.getElementById("pasteScorecardBox");
             if (box) box.value = "";
           })
           .catch(function (e) {
@@ -7722,14 +7722,14 @@
               requestAnimationFrame(fwTick);
             }
 
-            for (var _fi = 0; _fi < 4; _fi++)
+            for (let _fi = 0; _fi < 4; _fi++)
               spawnRocket(fw.width * (0.2 + Math.random() * 0.6));
             setTimeout(function () {
-              for (var _fi = 0; _fi < 4; _fi++)
+              for (let _fi = 0; _fi < 4; _fi++)
                 spawnRocket(fw.width * (0.2 + Math.random() * 0.6));
             }, 400);
             setTimeout(function () {
-              for (var _fi = 0; _fi < 4; _fi++)
+              for (let _fi = 0; _fi < 4; _fi++)
                 spawnRocket(fw.width * (0.2 + Math.random() * 0.6));
             }, 800);
 
@@ -10793,7 +10793,7 @@
 
       /* ── Mark the active option in the dropdown ── */
       function syncActiveState(active) {
-        var opts = document.querySelectorAll(".theme-option");
+        let opts = document.querySelectorAll(".theme-option");
         opts.forEach(function (btn) {
           btn.classList.toggle("active", btn.dataset.theme === active);
         });
@@ -10801,8 +10801,8 @@
 
       /* ── Toggle dropdown open/close ── */
       function bindToggle() {
-        var btn = document.getElementById("themeToggleBtn");
-        var dd = document.getElementById("themeDropdown");
+        let btn = document.getElementById("themeToggleBtn");
+        let dd = document.getElementById("themeDropdown");
         if (!btn || !dd) return;
 
         btn.addEventListener("click", function (e) {
@@ -10829,20 +10829,20 @@
 
       /* ── Init: restore saved theme, then watch for nav renders ── */
       function initTheme() {
-        var saved = "";
+        let saved = "";
         try {
           saved =
             localStorage.getItem("ipl_theme_v2026") ||
             localStorage.getItem("ipl-theme") ||
             "";
         } catch (e) { console.warn(e); }
-        var theme = VALID_THEMES.includes(saved) ? saved : "midnight";
+        let theme = VALID_THEMES.includes(saved) ? saved : "midnight";
         document.documentElement.setAttribute("data-theme", theme);
         document.body.setAttribute("data-theme", theme);
 
         /* Re-bind toggle whenever the nav is re-rendered into DOM */
-        var observer = new MutationObserver(function () {
-          var btn = document.getElementById("themeToggleBtn");
+        let observer = new MutationObserver(function () {
+          let btn = document.getElementById("themeToggleBtn");
           if (btn && !btn._themeBound) {
             btn._themeBound = true;
             bindToggle();
@@ -18064,10 +18064,10 @@
     <div class="toast" id="toast"></div>
     <script>
       (function () {
-        var _sc = document.getElementById("stadiumCanvas");
-        var _sctx = _sc.getContext("2d");
-        var _SCOL = ["#f59e0b", "#2563ff", "#ffffff", "#ff6b00", "#cc0000"];
-        var _sparts = [],
+        let _sc = document.getElementById("stadiumCanvas");
+        let _sctx = _sc.getContext("2d");
+        let _SCOL = ["#f59e0b", "#2563ff", "#ffffff", "#ff6b00", "#cc0000"];
+        let _sparts = [],
           _spaused = false;
         // Detect mobile (width) and iOS Safari specifically
         function _scisMob() {
@@ -18081,7 +18081,7 @@
         }
         function _scInit() {
           // On mobile/iOS: cap canvas at 1x pixel ratio to halve fill operations
-          var dpr =
+          let dpr =
             _scisMob() || _scIsIOS()
               ? 1
               : Math.min(window.devicePixelRatio || 1, 2);
@@ -18108,13 +18108,13 @@
         }
         function _scInitParts() {
           // Mobile: 20 particles; iOS: 15 (extra conservative); desktop: 80
-          var count = _scIsIOS() ? 15 : _scisMob() ? 20 : 80;
+          let count = _scIsIOS() ? 15 : _scisMob() ? 20 : 80;
           _sparts = [];
-          for (var i = 0; i < count; i++) _sparts.push(_scMakePart());
+          for (let i = 0; i < count; i++) _sparts.push(_scMakePart());
         }
         // Frame throttle: mobile targets ~24fps, desktop full 60fps
-        var _scLastT = 0;
-        var _scInterval = _scisMob() ? 42 : 0; // ms between frames
+        let _scLastT = 0;
+        let _scInterval = _scisMob() ? 42 : 0; // ms between frames
         function _scTick(now) {
           if (_spaused) return;
           if (_scInterval && now - _scLastT < _scInterval) {
@@ -18123,8 +18123,8 @@
           }
           _scLastT = now;
           _sctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-          for (var i = 0; i < _sparts.length; i++) {
-            var p = _sparts[i];
+          for (let i = 0; i < _sparts.length; i++) {
+            let p = _sparts[i];
             p.t++;
             p.x += p.vx + Math.sin(p.t * p.freq + p.phase) * p.amp;
             p.y += p.vy;
