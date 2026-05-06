@@ -526,6 +526,11 @@
 
       // ── PLAYER CAREER STATS (Lazy Load + Firestore Cache) ──
       let cachedProfiles = {};
+      // Negative cache: names confirmed missing in CricAPI this session.
+      // Without this, every click on a not-yet-indexed player burns 2 CricAPI
+      // calls (search + info) — repeatable indefinitely. Session-scoped because
+      // CricAPI may add the player later in the tournament; reload to retry.
+      const _profileNotFound = new Set();
 
       window.showPlayerProfile = async function (name) {
         // 1. Create overlay if it doesn't exist
@@ -574,6 +579,11 @@
         // 1. Memory Cache
         if (cachedProfiles[name]) return cachedProfiles[name];
 
+        // 1b. Negative cache — known missing in CricAPI; skip both API calls.
+        if (_profileNotFound.has(name)) {
+          throw new Error("Player not found in database");
+        }
+
         // 2. Firestore Cache
         const pRef = doc(db, "meta", "playerProfiles");
         let allProfiles = {};
@@ -596,13 +606,19 @@
         const searchUrl = `https://api.cricapi.com/v1/players?apikey=${cricKey}&offset=0&search=${encodeURIComponent(name)}`;
         const searchRes = await _cricFetch(searchUrl);
         const player = (searchRes.data || []).find(p => p.name.toLowerCase() === name.toLowerCase()) || searchRes.data?.[0];
-        
-        if (!player || !player.id) throw new Error("Player not found in database");
+
+        if (!player || !player.id) {
+          _profileNotFound.add(name);
+          throw new Error("Player not found in database");
+        }
 
         const infoUrl = `https://api.cricapi.com/v1/players_info?apikey=${cricKey}&id=${player.id}`;
         const infoRes = await _cricFetch(infoUrl);
         const data = infoRes.data;
-        if (!data) throw new Error("Career data unavailable for this player");
+        if (!data) {
+          _profileNotFound.add(name);
+          throw new Error("Career data unavailable for this player");
+        }
 
         const profile = {
           id: player.id, // Store ID for thumbnail URL
@@ -1141,9 +1157,14 @@
         arTimer = null,
         arSecs = 0;
       window.arStoredSecs = 60;
-      // CricAPI quota tracker (resets daily; persisted in localStorage to survive reloads)
+      // CricAPI quota tracker (resets daily; persisted in localStorage to survive reloads).
+      // Day key is UTC so DST shifts and timezone changes don't silently reset the counter
+      // mid-day. Multi-tab atomicity is approximate (each tab has its own localStorage view) —
+      // the visibility-pause + ticker leader election in this same session prevent the worst
+      // multi-tab amplification. A Firestore-backed atomic counter is a follow-up if needed.
       function _trackApiCall() {
-        const key = "cric_api_calls_" + new Date().toDateString();
+        const dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+        const key = "cric_api_calls_" + dayKey;
         let calls = parseInt(localStorage.getItem(key) || "0");
         if (calls >= 2000) {
           stopAR();
@@ -1212,6 +1233,10 @@
       let skipNextRefresh = false; // flag to prevent refresh after manual player add
       let _matchType = "ipl"; // 'ipl' | 'international' | 'domestic'
       const _autoFetchRunning = new Set(); // re-entrancy guard for autoFetchStats (match-scoped)
+      const _xiPreMatchGivenUp = new Set(); // mids where pre-match watcher hit MAX_ATTEMPTS — don't re-arm
+      const _prevTossResultByMid = {}; // last-seen tossResult per mid for transition detection
+      const _lastAutoFetchAt = {}; // mid → ms timestamp; coalesce duplicate background polls
+      const AUTOFETCH_MIN_INTERVAL_MS = 30000; // 30s — skips background polls within this window
       let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls
       let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
 
@@ -1474,10 +1499,23 @@
                 };
             }
             syncDerivedState();
-            // Auto-start XI watcher only after toss is confirmed (tossResult in Firestore).
-            // Do NOT call stopPreMatchXIWatcher here — letting onSnapshot manage the timer
-            // causes a feedback loop: write → snapshot → stop timer → restart → write → ...
-            if (session?.isAdmin) {
+            // Auto-start XI watcher only on the toss-set transition, not on every
+            // snapshot. The previous code fired this on every match update during
+            // pre-match. It was idempotent due to the timer-presence guard, BUT after
+            // the watcher exhausted MAX_ATTEMPTS it would set the timer to null —
+            // and the next snapshot would silently re-arm a fresh 40-attempt cycle,
+            // making the 60-min cap meaningless. Pair the transition check with a
+            // per-mid givenUp set so MAX_ATTEMPTS actually sticks.
+            const prevToss = _prevTossResultByMid[mid] || "";
+            const nowToss = data.tossResult || "";
+            _prevTossResultByMid[mid] = nowToss;
+            if (prevToss !== nowToss) {
+              // toss changed (set, cleared, or replaced) — admin is starting a fresh
+              // pre-match window for this mid, so allow auto-watcher to retry.
+              _xiPreMatchGivenUp.delete(mid);
+            }
+            const tossTransitioned = !prevToss && !!nowToss;
+            if (session?.isAdmin && tossTransitioned) {
               const _am = getMatch(getActiveMid());
               if (
                 _am?.tossResult &&
@@ -1485,7 +1523,7 @@
                 !_am?.locked &&
                 !_am?.finalized
               ) {
-                startPreMatchXIWatcher(); // only starts if _xiPreMatchTimer is null
+                startPreMatchXIWatcher(); // guarded internally by givenUp + timer presence
               }
             }
             // Auto-redirect member to Live Scores when toss is revealed
@@ -5328,9 +5366,16 @@
             reRender();
           };
         });
+        // Debounce search input — every keystroke would otherwise re-render the
+        // full player picker (~50 cards), causing input lag on low-end Android.
+        let _searchDebounce = null;
         document.getElementById("pSearch")?.addEventListener("input", (e) => {
           curSearch = e.target.value;
-          reRender();
+          if (_searchDebounce) clearTimeout(_searchDebounce);
+          _searchDebounce = setTimeout(() => {
+            _searchDebounce = null;
+            reRender();
+          }, 120);
         });
         document.getElementById("capSel")?.addEventListener("change", (e) => {
           localTeam.captain = e.target.value;
@@ -8764,6 +8809,9 @@
           clearInterval(window._xiPollTimer);
           window._xiPollTimer = null;
         }
+        // Manual fetch resets the auto-watcher's "given up" state so the
+        // background watcher can resume after this session if conditions still apply.
+        _xiPreMatchGivenUp.delete(activeMid);
         let attempt = 0;
         const MAX_ATTEMPTS = 20;
         const INTERVAL_MS = 20000;
@@ -8782,7 +8830,9 @@
             return;
           }
           console.log(`[XI Poller] Attempt ${attempt}/${MAX_ATTEMPTS}...`);
-          await autoFetchStats(attempt === 1);
+          // bypassCoalescer=true: this is a user-initiated 20s retry loop; the
+          // 30s background-poll coalescer would otherwise drop every other call.
+          await autoFetchStats(attempt === 1, true);
           const matchAfter = getMatch(getActiveMid());
           if (matchAfter?.xiReady) {
             clearInterval(window._xiPollTimer);
@@ -9340,17 +9390,22 @@
           toast("CricAPI key not configured — set it in League Settings first", "err");
           return;
         }
+        if (window._smokeTestRunning) {
+          toast("Smoke test already running…", "info");
+          return;
+        }
+        window._smokeTestRunning = true;
         toast("🚀 Starting Smoke Test...", "info");
         console.group("IPL Fantasy Smoke Test");
 
         let report = { api: "❌", firestore: "❌", logic: "❌", quota: "–" };
 
         try {
-          // 1. API Test
-          const res = await fetch(
+          // 1. API Test — route through _cricFetch so the call counts against the
+          // daily quota tracker and uses the central timeout/abort plumbing.
+          const data = await _cricFetch(
             `https://api.cricapi.com/v1/currentMatches?apikey=${key}&offset=0`,
           );
-          const data = await res.json();
           if (data.status === "success") {
             report.api = "✅";
             report.quota = `${data.info?.hitsUsed || "–"} / ${data.info?.hitsLimit || "–"}`;
@@ -9438,12 +9493,13 @@
           if (m) m.classList.add("sheet-open");
         });
         toast("Smoke test complete.", "ok");
+        window._smokeTestRunning = false;
       };
 
       // --- DEBUG HELPER ---
       /* window.forceDebugScorecard removed for production */
 
-      async function autoFetchStats(showFeedback = false) {
+      async function autoFetchStats(showFeedback = false, bypassCoalescer = false) {
         const activeMid = getActiveMid();
         if (!activeMid) {
           if (showFeedback) toast("No active match selected", "err");
@@ -9455,6 +9511,20 @@
           console.log(`[autoFetchStats] Skipping ${activeMid} — fetch in flight`);
           return;
         }
+
+        // Coalesce duplicate background polls. XI watcher (90s), auto-refresh
+        // (configurable), grace-poll setTimeouts and the scorecard→match_info
+        // fallback can all fire within seconds of each other for the same match.
+        // Manual "Fetch Now" (showFeedback=true) and adminFetchXI's 20s retry
+        // loop (bypassCoalescer=true) skip the coalescer.
+        if (!showFeedback && !bypassCoalescer) {
+          const last = _lastAutoFetchAt[activeMid] || 0;
+          if (Date.now() - last < AUTOFETCH_MIN_INTERVAL_MS) {
+            console.log(`[autoFetchStats] Coalesced ${activeMid} — last fetch ${Math.round((Date.now()-last)/1000)}s ago`);
+            return;
+          }
+        }
+        _lastAutoFetchAt[activeMid] = Date.now();
 
         _autoFetchRunning.add(activeMid);
         try {
@@ -9496,8 +9566,6 @@
               `https://api.cricapi.com/v1/match_info?apikey=${key}&id=${mid}`,
             );
             if (infoFallback.status === "success") {
-              // Track quota used only for successful (or at least attempted/connected) calls
-              _trackApiCall(); 
               const fbScore  = infoFallback.data?.score   || [];
 
               const fbStatus = infoFallback.data?.status  || "";
@@ -9538,9 +9606,6 @@
             }
             return;
           }
-
-          // Track quota used only for successful calls
-          _trackApiCall();
 
           const started = scData.data?.matchStarted;
 
@@ -10258,6 +10323,12 @@
         )
           return;
         if (window._xiPreMatchTimer) return; // already watching — don't double-start
+        if (_xiPreMatchGivenUp.has(mid)) {
+          // Hit MAX_ATTEMPTS earlier this session for this match; admin can re-arm
+          // by clicking "Fetch XI" or by toss being re-set in Firestore.
+          console.log(`[XI Watcher] Skipping ${mid} — gave up earlier this session.`);
+          return;
+        }
 
         let attempts = 0;
         const MAX_ATTEMPTS = 40; // 40 × 90s ≈ 60 min coverage (well past toss window)
@@ -10276,9 +10347,16 @@
             !m?.liveMatchId ||
             m?.xiReady ||
             m?.locked ||
-            m?.finalized ||
-            attempts > MAX_ATTEMPTS
+            m?.finalized
           ) {
+            stopPreMatchXIWatcher();
+            return;
+          }
+          if (attempts > MAX_ATTEMPTS) {
+            // Mark this mid as given-up so a stray snapshot can't re-arm a fresh
+            // 40-attempt cycle. Cleared on tossResult transition or manual Fetch XI.
+            _xiPreMatchGivenUp.add(watchedMid);
+            console.warn(`[XI Watcher] Gave up after ${MAX_ATTEMPTS} attempts for ${watchedMid}.`);
             stopPreMatchXIWatcher();
             return;
           }
@@ -10487,6 +10565,48 @@
       // ── Sticky Score Pill ──
       let globalTickerData = [];
 
+      // ── Cross-tab ticker leader election ──
+      // The visibility-pause already stops the ticker in backgrounded tabs, but
+      // multiple foreground admin tabs (separate windows) would each fire their
+      // own currentMatches poll every 5 min — N× quota for N tabs. A localStorage-
+      // based heartbeat picks one tab as leader; followers skip starting their
+      // own interval until the leader's claim goes stale.
+      const TICKER_LEADER_KEY = "cric_ticker_leader_v1";
+      const TICKER_LEADER_STALE_MS = 6 * 60 * 1000; // 6 min — slightly > 5 min poll cadence
+      function _tabId() {
+        if (!window._iplTabId) {
+          window._iplTabId = crypto.randomUUID
+            ? crypto.randomUUID()
+            : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        }
+        return window._iplTabId;
+      }
+      function _readTickerLeader() {
+        try {
+          const raw = localStorage.getItem(TICKER_LEADER_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+      }
+      function _shouldStartTicker() {
+        const state = _readTickerLeader();
+        if (!state || !state.ts) return true;
+        if (Date.now() - state.ts > TICKER_LEADER_STALE_MS) return true;
+        return state.tabId === _tabId();
+      }
+      function _claimTickerLeader() {
+        try {
+          localStorage.setItem(TICKER_LEADER_KEY, JSON.stringify({ tabId: _tabId(), ts: Date.now() }));
+        } catch {}
+      }
+      // Release leadership on tab close so a sibling tab can claim immediately
+      // instead of waiting up to 6 min for the staleness window.
+      window.addEventListener("pagehide", () => {
+        const state = _readTickerLeader();
+        if (state && state.tabId === _tabId()) {
+          try { localStorage.removeItem(TICKER_LEADER_KEY); } catch {}
+        }
+      });
+
       // Only start the ticker for admin sessions with active matches — avoids
       // burning CricAPI credits from idle member tabs (each tab was polling
       // currentMatches every 5 min regardless of role).
@@ -10494,11 +10614,18 @@
         if (_tickerInterval) return; // already running
         if (!session.isAdmin) return; // members don't need it
         if (!(metaGame.activeMatchIds || []).length && !metaGame.currentMatchId) return; // no matches
+        if (!_shouldStartTicker()) {
+          console.log("[Ticker] Another tab holds leadership — skipping start.");
+          return;
+        }
+        _claimTickerLeader();
         fetchGlobalTicker();
         _tickerInterval = setInterval(fetchGlobalTicker, 300000); // 5 min
       }
 
       async function fetchGlobalTicker() {
+        // Refresh leadership claim each tick so other tabs see this one as live.
+        _claimTickerLeader();
         try {
           const cKey = (metaGame || {}).cricApiKey;
           if (!cKey) return;
@@ -10866,11 +10993,26 @@
       }
 
       // ── Background Hibernation (Data Pollers) ──
+      // Pauses every CricAPI-touching poller while the tab is hidden so we don't
+      // burn quota/battery on backgrounded tabs. Resumes on visible if the
+      // poller was running and conditions still apply.
       document.addEventListener("visibilitychange", function () {
         if (document.hidden) {
-          // Tab hidden: pause background data fetching
-          if (window._tickerInterval) { clearInterval(window._tickerInterval); window._tickerInterval = null; }
+          // _tickerInterval is module-scoped (declared at top of script). The
+          // previous code cleared window._tickerInterval, which was undefined,
+          // so the ticker never actually paused.
+          if (_tickerInterval) { clearInterval(_tickerInterval); _tickerInterval = null; }
           if (arIntervalTimer) { stopAR(); }
+          if (window._xiPreMatchTimer) {
+            clearInterval(window._xiPreMatchTimer);
+            window._xiPreMatchTimer = null;
+            window._xiPreMatchPausedByVisibility = true;
+          }
+          if (window._xiPollTimer) {
+            clearInterval(window._xiPollTimer);
+            window._xiPollTimer = null;
+            window._xiPollPausedByVisibility = true;
+          }
           console.log("[System] Data pollers hibernated.");
         } else {
           // Tab visible: resume
@@ -10880,6 +11022,21 @@
             const el = document.getElementById("arIntervalInp") || document.getElementById("arInterval");
             const val = parseInt(el?.value || window._arStoredSecs);
             if (!isNaN(val) && val > 0) startAR(val);
+          }
+          // Resume pre-match XI watcher only if it was running before pause and
+          // the pre-match guard conditions still hold for the active match.
+          if (window._xiPreMatchPausedByVisibility) {
+            window._xiPreMatchPausedByVisibility = false;
+            if (session?.isAdmin) {
+              const _am = getMatch(getActiveMid());
+              if (_am?.tossResult && !_am?.xiReady && !_am?.locked && !_am?.finalized) {
+                startPreMatchXIWatcher();
+              }
+            }
+          }
+          // _xiPollTimer is started by an explicit "Fetch XI" click; don't auto-resume.
+          if (window._xiPollPausedByVisibility) {
+            window._xiPollPausedByVisibility = false;
           }
           console.log("[System] Data pollers resumed.");
         }
@@ -18064,6 +18221,12 @@
     <div class="toast" id="toast"></div>
     <script>
       (function () {
+        // Honor prefers-reduced-motion: skip the entire particle animation. Users
+        // who set this at the OS level explicitly do not want ambient motion;
+        // the canvas remains as a transparent layer so layout is unchanged.
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          return;
+        }
         let _sc = document.getElementById("stadiumCanvas");
         let _sctx = _sc.getContext("2d");
         let _SCOL = ["#f59e0b", "#2563ff", "#ffffff", "#ff6b00", "#cc0000"];

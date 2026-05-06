@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.12.0** — [Changelog](#-changelog)
+**Current version: v3.13.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,19 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.13.0 — May 6, 2026
+**Performance & Quota Hardening (iOS / Android)**
+- **Visibility-pause repaired**: `clearInterval(window._tickerInterval)` was clearing the wrong reference (the live handle is module-scoped). Backgrounded tabs were quietly burning CricAPI quota. Now correctly stops `_tickerInterval`, `_xiPreMatchTimer`, and `_xiPollTimer` on `document.hidden`, and resumes them on `visibilitychange`.
+- **XI auto-watcher decoupled from `onSnapshot`**: The pre-match XI watcher was being unconditionally invoked from every match snapshot. After it exhausted MAX_ATTEMPTS and cleared its timer, the next snapshot silently re-armed a fresh 40-attempt cycle — making the 60-minute cap meaningless. Now gated on toss-result transition + a per-`mid` "given-up" Set, so MAX_ATTEMPTS actually sticks.
+- **`autoFetchStats` coalescer (30 s)**: Background polls within 30 s of a previous attempt for the same `mid` are skipped. Admin-initiated retries (`adminFetchXI`'s 20 s loop) and the manual fetch button bypass the coalescer via an explicit flag.
+- **Smoke-test routed through `_cricFetch`**: The diagnostic smoke test was bypassing the quota tracker via raw `fetch()`, undercounting daily usage. Now flows through the central wrapper and respects the 2000-call cap.
+- **Cross-tab ticker leader election**: `fetchGlobalTicker` previously ran in every open tab, multiplying CricAPI calls per user (5 tabs ≈ 1440 wasted credits/day). Now uses a 6-minute localStorage heartbeat — only one tab is the "leader" and runs the ticker; followers stay quiet.
+- **Negative cache for player profiles**: Clicking a not-yet-indexed player burned 2 CricAPI calls (search + info) on every click. A session-scoped `_profileNotFound` Set short-circuits subsequent clicks. Reload to retry.
+- **Quota-tracker UTC day key**: `_trackApiCall` was using `new Date().toDateString()` (local timezone), so DST transitions and travel could silently reset the counter mid-day. Switched to `toISOString().slice(0,10)` (UTC `YYYY-MM-DD`).
+- **Removed duplicate `_trackApiCall()` calls**: Two double-counting invocations inside `autoFetchStats` (scorecard + match_info fallback paths) were inflating the daily count — `_cricFetch` already tracks every attempt. Removed.
+- **Search input debounced (120 ms)**: The player-picker search re-rendered ~50 cards on every keystroke, causing input lag on low-end Android. Now debounced.
+- **Canvas particles honor `prefers-reduced-motion`**: The ambient stadium particle canvas (~15–80 particles via `requestAnimationFrame`) now exits early when the OS-level reduce-motion preference is set. Mobile already had visibility-pause; this adds OS-preference respect.
 
 ### v3.12.0 — April 30, 2026
 **Logic & Data Integrity Overhaul**
