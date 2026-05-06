@@ -10020,6 +10020,18 @@
                 );
                 if (wktTotal > 0) w = wktTotal;
               }
+              // Fallback: Sum bowler overs (cricket notation) if o is 0 but bowlers have overs
+              if (parseFloat(o) === 0 && (inn.bowling || []).length > 0) {
+                const totalBalls = (inn.bowling || []).reduce((sum, bw) => {
+                  const ov = parseFloat(bw.o || bw.ov || 0) || 0;
+                  const fullOv = Math.floor(ov);
+                  const balls = Math.round((ov - fullOv) * 10);
+                  return sum + fullOv * 6 + (balls >= 0 && balls <= 6 ? balls : 0);
+                }, 0);
+                if (totalBalls > 0) {
+                  o = Math.floor(totalBalls / 6) + (totalBalls % 6) / 10;
+                }
+              }
 
               return {
                 r: r,
@@ -10037,6 +10049,19 @@
               const apiTotal = scoreArr.reduce((s, i) => s + i.r, 0);
               if (scTotal > apiTotal) scoreArr = mappedFromSc;
             }
+            // Backfill missing overs in scoreArr from mappedFromSc (CricAPI sometimes
+            // returns r/w but a stale/empty o field even though the bowling has overs).
+            scoreArr = scoreArr.map((s) => {
+              const sOv = parseFloat(s.o ?? s.ov ?? 0) || 0;
+              if (sOv > 0) return s;
+              const match = mappedFromSc.find((m) => {
+                const k1 = resolveInningKey(s.inning, activeMatchData);
+                const k2 = resolveInningKey(m.inning, activeMatchData);
+                return (k1 && k1 === k2) || m.inning === s.inning;
+              });
+              if (match && parseFloat(match.o) > 0) return { ...s, o: match.o };
+              return s;
+            });
           }
           const matchStatus = data.data?.status || "";
           if (scoreArr.length) statsUpdate["score"] = scoreArr;
