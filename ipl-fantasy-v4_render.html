@@ -1747,14 +1747,7 @@
             // Re-render tab bar so Live Stats button appears/disappears with match state
             const adminTabsEl = document.querySelector("#admin-body .view-tabs");
             if (adminTabsEl) adminTabsEl.outerHTML = _adminTabsHtml(t);
-            let body = "";
-            if (t === "match")      body = renderAdminMatch();
-            if (t === "stats")      body = renderAdminStats();
-            if (t === "season")     body = renderAdminSeason();
-            if (t === "league")     body = renderAdminLeague();
-            if (t === "history")    body = renderHistoryTab();
-            if (t === "scoreboard") body = renderLiveScoreboardTab();
-            adminContent.innerHTML = body;
+            adminContent.innerHTML = _renderAdminTabBody(t);
             // Force layout flush for touch hit-box rebuild — skip on pointer devices
             // where it only causes a synchronous reflow with no benefit
             /* void adminContent.offsetHeight; removed for mobile perf */
@@ -1778,17 +1771,10 @@
               t = "team";
               history.replaceState({}, "", `${location.pathname}?tab=team`);
             }
-            let body = "";
-            if (t === "team")        body = renderTeamTab();
-            if (t === "live")        body = renderLiveTab();
-            if (t === "stats")       body = renderMemberStatsTab();
-            if (t === "season")      body = renderSeasonTab();
-            if (t === "history")     body = renderHistoryTab();
-            if (t === "scoreboard")  body = renderLiveScoreboardTab();
             memberBody.innerHTML =
               _memberTabsHtml(t) +
               renderMemberMatchSelector() +
-              `<div id="tab-body" class="tab-content">${body}</div>`;
+              `<div id="tab-body" class="tab-content">${_renderMemberTabBody(t)}</div>`;
             requestAnimationFrame(() => {
               bindMember(true);
               if (
@@ -1971,6 +1957,18 @@
         if (!name) return "Enter your name";
         if (_NAME_BAD_CHARS.test(name)) return "Name cannot contain . [ ] # $ / — choose a different name";
         return null; // valid
+      }
+
+      // Strip Firestore-unsafe chars from player names imported from CricAPI.
+      // Player names like "K.L. Rahul" or "M.S. Dhoni" arrive with periods, and
+      // the periods are interpreted as nested-key separators when the name is
+      // used in dot-paths like `stats.${name}.bat_runs` — silently corrupting
+      // every match document. Removing them at ingestion keeps keys flat; the
+      // fuzzy scorecard matcher (`robustMatch`) already strips non-alpha chars,
+      // so "KL Rahul" still matches a "K.L. Rahul" entry from the API.
+      function sanitizePlayerName(raw) {
+        if (!raw) return "";
+        return String(raw).replace(/[.\[\]#$/]/g, "").replace(/\s+/g, " ").trim();
       }
 
       function pinVal(sel) {
@@ -2289,23 +2287,30 @@
         history.replaceState({}, "", `${location.pathname}?tab=${_safeTab}`);
         const memberBody = document.getElementById("member-body");
         if (memberBody) {
-          let _tabBody = "";
-          if (_safeTab === "team")        _tabBody = renderTeamTab();
-          else if (_safeTab === "live")   _tabBody = renderLiveTab();
-          else if (_safeTab === "stats")  _tabBody = renderMemberStatsTab();
-          else if (_safeTab === "season") _tabBody = renderSeasonTab();
-          else if (_safeTab === "history") _tabBody = renderHistoryTab();
-          else if (_safeTab === "scoreboard") _tabBody = renderLiveScoreboardTab();
-          else _tabBody = renderTeamTab();
           memberBody.innerHTML =
             _memberTabsHtml(_safeTab) +
             renderMemberMatchSelector() +
-            `<div id="tab-body">${_tabBody}</div>`;
+            `<div id="tab-body">${_renderMemberTabBody(_safeTab)}</div>`;
           requestAnimationFrame(() => bindMember(true));
         } else {
           showScreen("member");
         }
       };
+
+      // Single source of truth for member tab → renderer mapping.
+      // Replaces 5 hand-copied if-chains scattered across switchTab/renderMember/_doRefresh.
+      const _MEMBER_TAB_RENDERERS = {
+        team:       () => renderTeamTab(),
+        live:       () => renderLiveTab(),
+        stats:      () => renderMemberStatsTab(),
+        season:     () => renderSeasonTab(),
+        history:    () => renderHistoryTab(),
+        scoreboard: () => renderLiveScoreboardTab(),
+      };
+      function _renderMemberTabBody(t) {
+        const fn = _MEMBER_TAB_RENDERERS[t];
+        return fn ? fn() : renderTeamTab();
+      }
 
       function renderMember() {
         let tab = new URLSearchParams(location.search).get("tab") || "team";
@@ -2316,14 +2321,7 @@
         }
 
         const matchSelector = renderMemberMatchSelector();
-
-        let body = "";
-        if (tab === "team")        body = renderTeamTab();
-        if (tab === "live")        body = renderLiveTab();
-        if (tab === "stats")       body = renderMemberStatsTab();
-        if (tab === "season")      body = renderSeasonTab();
-        if (tab === "history")     body = renderHistoryTab();
-        if (tab === "scoreboard")  body = renderLiveScoreboardTab();
+        const body = _renderMemberTabBody(tab);
 
         return `<div class="screen-main">${nav()}<div id="member-body">${_memberTabsHtml(tab)}${matchSelector}<div id="tab-body">${body}</div></div></div>`;
       }
@@ -2393,29 +2391,15 @@
             const m = b.getAttribute("onclick")?.match(/switchTab\('(\w+)'\)/);
             b.classList.toggle("active", !!(m && m[1] === t));
           });
-          let body = "";
-          if (t === "team")        body = renderTeamTab();
-          if (t === "live")        body = renderLiveTab();
-          if (t === "stats")       body = renderMemberStatsTab();
-          if (t === "season")      body = renderSeasonTab();
-          if (t === "history")     body = renderHistoryTab();
-          if (t === "scoreboard")  body = renderLiveScoreboardTab();
-          tabBody.innerHTML = body;
+          tabBody.innerHTML = _renderMemberTabBody(t);
           requestAnimationFrame(() => bindMember(true));
         } else {
           const memberBody = document.getElementById("member-body");
           if (memberBody) {
-            let body = "";
-            if (t === "team")        body = renderTeamTab();
-            if (t === "live")        body = renderLiveTab();
-            if (t === "stats")       body = renderMemberStatsTab();
-            if (t === "season")      body = renderSeasonTab();
-            if (t === "history")     body = renderHistoryTab();
-            if (t === "scoreboard")  body = renderLiveScoreboardTab();
             memberBody.innerHTML =
               _memberTabsHtml(t) +
               renderMemberMatchSelector() +
-              `<div id="tab-body">${body}</div>`;
+              `<div id="tab-body">${_renderMemberTabBody(t)}</div>`;
             requestAnimationFrame(() => bindMember(true));
           } else {
             showScreen("member");
@@ -5612,20 +5596,28 @@
           // Re-render tab bar so Live Stats button appears/disappears with match state
           const adminTabsEl2 = document.querySelector("#admin-body .view-tabs");
           if (adminTabsEl2) adminTabsEl2.outerHTML = _adminTabsHtml(t);
-          let body = "";
-          if (t === "match")      body = renderAdminMatch();
-          if (t === "stats")      body = renderAdminStats();
-          if (t === "season")     body = renderAdminSeason();
-          if (t === "league")     body = renderAdminLeague();
-          if (t === "history")    body = renderHistoryTab();
-          if (t === "scoreboard") body = renderLiveScoreboardTab();
-          adminContent.innerHTML = body;
+          adminContent.innerHTML = _renderAdminTabBody(t);
           /* void adminContent.offsetHeight; removed for mobile perf */
           bindAdmin(true); // synchronous — buttons bound before next user tap
         } else {
           refreshView();
         }
       };
+
+      // Single source of truth for admin tab → renderer mapping.
+      // Replaces 4 hand-copied if-chains that drifted independently.
+      const _ADMIN_TAB_RENDERERS = {
+        match:      () => renderAdminMatch(),
+        stats:      () => renderAdminStats(),
+        season:     () => renderAdminSeason(),
+        league:     () => renderAdminLeague(),
+        history:    () => renderHistoryTab(),
+        scoreboard: () => renderLiveScoreboardTab(),
+      };
+      function _renderAdminTabBody(t) {
+        const fn = _ADMIN_TAB_RENDERERS[t];
+        return fn ? fn() : "";
+      }
 
       function renderAdmin() {
         let adminTab = new URLSearchParams(location.search).get("atab") || "match";
@@ -5637,14 +5629,7 @@
 
         const tabs = _adminTabsHtml(adminTab);
         const matchTabs = renderMatchSelectorTabs();
-
-        let body = "";
-        if (adminTab === "match")      body = renderAdminMatch();
-        if (adminTab === "stats")      body = renderAdminStats();
-        if (adminTab === "season")     body = renderAdminSeason();
-        if (adminTab === "league")     body = renderAdminLeague();
-        if (adminTab === "history")    body = renderHistoryTab();
-        if (adminTab === "scoreboard") body = renderLiveScoreboardTab();
+        const body = _renderAdminTabBody(adminTab);
 
         return `<div class="screen-main">${nav(true)}<div id="admin-body">${tabs}${matchTabs}<div id="admin-content">${body}</div></div></div>`;
       }
@@ -5661,14 +5646,7 @@
           const adminTabsEl = document.querySelector("#admin-body .view-tabs");
           if (adminTabsEl) adminTabsEl.outerHTML = _adminTabsHtml(t);
 
-          let body = "";
-          if (t === "match")       body = renderAdminMatch();
-          if (t === "stats")       body = renderAdminStats();
-          if (t === "season")      body = renderAdminSeason();
-          if (t === "league")      body = renderAdminLeague();
-          if (t === "history")     body = renderHistoryTab();
-          if (t === "scoreboard")  body = renderLiveScoreboardTab();
-          adminContent.innerHTML = body;
+          adminContent.innerHTML = _renderAdminTabBody(t);
 
           /* void adminContent.offsetHeight; removed for mobile perf */
 
@@ -8805,57 +8783,61 @@
           toast("No active match selected", "err");
           return;
         }
+        // Cancel any prior poll (now a setTimeout chain, not setInterval)
         if (window._xiPollTimer) {
-          clearInterval(window._xiPollTimer);
+          clearTimeout(window._xiPollTimer);
           window._xiPollTimer = null;
         }
         // Manual fetch resets the auto-watcher's "given up" state so the
         // background watcher can resume after this session if conditions still apply.
         _xiPreMatchGivenUp.delete(activeMid);
         let attempt = 0;
-        const MAX_ATTEMPTS = 20;
-        const INTERVAL_MS = 20000;
+        // Exponential backoff: 20s → 30s → 45s → 67s → 90s (capped). Earlier
+        // implementation fixed at 20s × 20 attempts could burn ~20 quota in
+        // 7 min when CricAPI was slow to populate XI; backoff caps that at
+        // ~12 attempts spread over ~12 min (worst case ~12 quota).
+        const MAX_ATTEMPTS = 12;
+        const nextDelayMs = (n) => Math.min(20000 * Math.pow(1.5, n - 1), 90000);
         toast(
-          "🔍 Fetching Playing XI... (auto-retries every 20s if not ready)",
+          "🔍 Fetching Playing XI... (auto-retries with backoff if not ready)",
           "info",
         );
         const tryFetch = async () => {
           attempt++;
           const matchNow = getMatch(getActiveMid());
           if (matchNow?.finalized || matchNow?.xiReady) {
-            clearInterval(window._xiPollTimer);
             window._xiPollTimer = null;
             if (matchNow?.xiReady)
               toast("✅ Playing XI already confirmed — no fetch needed");
             return;
           }
           console.log(`[XI Poller] Attempt ${attempt}/${MAX_ATTEMPTS}...`);
-          // bypassCoalescer=true: this is a user-initiated 20s retry loop; the
-          // 30s background-poll coalescer would otherwise drop every other call.
+          // bypassCoalescer=true: this is a user-initiated retry loop; the
+          // 30s background-poll coalescer would otherwise drop the early
+          // (20s) retries.
           await autoFetchStats(attempt === 1, true);
           const matchAfter = getMatch(getActiveMid());
           if (matchAfter?.xiReady) {
-            clearInterval(window._xiPollTimer);
             window._xiPollTimer = null;
             toast("✅ Playing XI confirmed for both teams!", "ok");
-          } else if (attempt >= MAX_ATTEMPTS) {
-            clearInterval(window._xiPollTimer);
+            return;
+          }
+          if (attempt >= MAX_ATTEMPTS) {
             window._xiPollTimer = null;
             toast(
               "XI not loaded from API — paste names in 'XI not loading?' panel below",
               "err",
             );
-          } else {
-            toast(
-              `[${attempt}/${MAX_ATTEMPTS}] XI not ready yet — retrying in 20s...`,
-              "info",
-            );
+            return;
           }
+          const wait = nextDelayMs(attempt);
+          toast(
+            `[${attempt}/${MAX_ATTEMPTS}] XI not ready yet — retrying in ${Math.round(wait / 1000)}s...`,
+            "info",
+          );
+          window._xiPollTimer = setTimeout(tryFetch, wait);
         };
         await tryFetch();
-        if (!getMatch(activeMid)?.xiReady) {
-          window._xiPollTimer = setInterval(tryFetch, INTERVAL_MS);
-        }
       };
 
       window.adminStartMatch = async function () {
@@ -9314,11 +9296,13 @@
             const teamsData = Array.isArray(fantasyRes.data) ? fantasyRes.data : [fantasyRes.data];
             teamsData.forEach((team) => {
               (team.players || []).forEach((p) => {
+                const safeName = sanitizePlayerName(p.name);
+                if (!safeName) return;
                 players.push({
                   id: p.id,
-                  name: p.name,
+                  name: safeName,
                   team: team.teamName || team.name || "Team",
-                  role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                  role: ROLE_OVERRIDES[safeName] || ROLE_OVERRIDES[p.name] || mapRole(p.role),
                   credits: p.fantasyCredits || p.fantasyPlayerRating || null
                 });
               });
@@ -9330,11 +9314,13 @@
             players = []; // Reset just in case
             infoRes.data.teamInfo.forEach((team) => {
               (team.players || []).forEach((p) => {
+                const safeName = sanitizePlayerName(p.name);
+                if (!safeName) return;
                 players.push({
                   id: p.id,
-                  name: p.name,
+                  name: safeName,
                   team: team.shortname || team.name,
-                  role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                  role: ROLE_OVERRIDES[safeName] || ROLE_OVERRIDES[p.name] || mapRole(p.role),
                   credits: null
                 });
               });
@@ -9353,11 +9339,13 @@
                 : [squadRes.data];
               teamsData.forEach((team) => {
                 (team.players || []).forEach((p) => {
+                  const safeName = sanitizePlayerName(p.name);
+                  if (!safeName) return;
                   players.push({
                     id: p.id,
-                    name: p.name,
+                    name: safeName,
                     team: team.teamName || team.name || "Team",
-                    role: ROLE_OVERRIDES[p.name] || mapRole(p.role),
+                    role: ROLE_OVERRIDES[safeName] || ROLE_OVERRIDES[p.name] || mapRole(p.role),
                     credits: null
                   });
                 });
@@ -10644,11 +10632,54 @@
           return;
         }
         _claimTickerLeader();
-        fetchGlobalTicker();
+        // Only fire immediately if our cached data is older than the 4-min floor.
+        // Without this, every visibility-resume / Firestore-snapshot replay calls
+        // _startTickerIfNeeded() and fires an immediate currentMatches request,
+        // even if the same tab fetched 30 seconds ago.
+        const last = _readLastTickerFetch();
+        if (Date.now() - last >= TICKER_MIN_GAP_MS) {
+          fetchGlobalTicker();
+        } else {
+          console.log("[Ticker] Skipping immediate fire — last fetch was within 4 min.");
+        }
         _tickerInterval = setInterval(fetchGlobalTicker, 300000); // 5 min
       }
 
+      // Cross-tab/cross-resume timestamp of the last currentMatches fetch.
+      // Lives in localStorage so reloads, visibility resumes, and other tabs
+      // all see the same coalescer floor.
+      const TICKER_LAST_FETCH_KEY = "cric_ticker_last_fetch_v1";
+      const TICKER_MIN_GAP_MS = 4 * 60 * 1000; // 4 min — defensive floor below 5 min cadence
+      function _readLastTickerFetch() {
+        try {
+          const raw = localStorage.getItem(TICKER_LAST_FETCH_KEY);
+          const n = raw ? parseInt(raw, 10) : 0;
+          return Number.isFinite(n) ? n : 0;
+        } catch { return 0; }
+      }
+      function _writeLastTickerFetch(ts) {
+        try { localStorage.setItem(TICKER_LAST_FETCH_KEY, String(ts)); } catch {}
+      }
+
       async function fetchGlobalTicker() {
+        // ── Per-tick leadership verification ──
+        // Two tabs can both pass _shouldStartTicker() at startup (race when no
+        // leader exists) and end up with parallel intervals. Re-check each tick
+        // and step down if another tab now holds a fresh claim.
+        const state = _readTickerLeader();
+        const isFresh = state && state.ts && (Date.now() - state.ts) < TICKER_LEADER_STALE_MS;
+        if (isFresh && state.tabId !== _tabId()) {
+          console.log("[Ticker] Another tab is leader — stopping our interval to avoid double-poll.");
+          if (_tickerInterval) { clearInterval(_tickerInterval); _tickerInterval = null; }
+          return;
+        }
+        // Defensive coalescer: skip if anyone (this tab or another) fetched within
+        // the floor window. localStorage-backed so it survives reloads/resumes.
+        if (Date.now() - _readLastTickerFetch() < TICKER_MIN_GAP_MS) {
+          console.log("[Ticker] Skipping — last fetch was within 4 min.");
+          return;
+        }
+        _writeLastTickerFetch(Date.now());
         // Refresh leadership claim each tick so other tabs see this one as live.
         _claimTickerLeader();
         try {
@@ -11034,7 +11065,7 @@
             window._xiPreMatchPausedByVisibility = true;
           }
           if (window._xiPollTimer) {
-            clearInterval(window._xiPollTimer);
+            clearTimeout(window._xiPollTimer);
             window._xiPollTimer = null;
             window._xiPollPausedByVisibility = true;
           }

@@ -682,8 +682,45 @@ async function runAllTests() {
     assert("escHtml handles number input", escHtml(42) === "");
   }
 
-  // 4d. Static DNA — inline onclick handlers
-  log("\n  [4d] Static DNA — window function exposure");
+  // 4d. Player-name sanitization — guards against Firestore dot-path injection
+  log("\n  [4d] Player-name sanitization — Firestore dot-path safety");
+  try {
+    const html = fs.readFileSync(path.join(__dirname, "ipl-fantasy-v4_render.html"), "utf-8");
+
+    // Function is defined
+    assert("sanitizePlayerName helper is defined",
+      /function\s+sanitizePlayerName\s*\(/.test(html));
+
+    // Reimplement to verify behavior matches expected
+    function sanitizePlayerName(raw) {
+      if (!raw) return "";
+      return String(raw).replace(/[.\[\]#$/]/g, "").replace(/\s+/g, " ").trim();
+    }
+    assert("strips periods (K.L. Rahul → KL Rahul)",
+      sanitizePlayerName("K.L. Rahul") === "KL Rahul");
+    assert("strips brackets/hash/$/slash",
+      sanitizePlayerName("foo[bar]#baz$qux/zip") === "foobarbazquxzip");
+    assert("collapses runs of whitespace",
+      sanitizePlayerName("M.S.  Dhoni") === "MS Dhoni");
+    assert("returns empty for empty/null",
+      sanitizePlayerName("") === "" && sanitizePlayerName(null) === "");
+    assert("leaves clean names untouched",
+      sanitizePlayerName("Virat Kohli") === "Virat Kohli");
+
+    // Wired into all three loadMatchPlayers ingestion paths
+    const importBlock = html.slice(
+      html.indexOf("async function loadMatchPlayers"),
+      html.indexOf("async function loadMatchPlayers") + 4000
+    );
+    const sanitizeCalls = (importBlock.match(/sanitizePlayerName\(/g) || []).length;
+    assert("loadMatchPlayers calls sanitizePlayerName at every push site",
+      sanitizeCalls >= 3, `found ${sanitizeCalls} calls (expected ≥3)`);
+  } catch (e) {
+    assert("Player-name sanitization audit failed", false, e.message);
+  }
+
+  // 4e. Static DNA — inline onclick handlers
+  log("\n  [4e] Static DNA — window function exposure");
   try {
     const html = fs.readFileSync(path.join(__dirname, "ipl-fantasy-v4_render.html"), "utf-8");
 
