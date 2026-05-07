@@ -1,4 +1,4 @@
-Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.11.0
+Complete step-by-step guide for setting up and running the IPL Fantasy League app. Current version: v3.14.0
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -363,7 +363,7 @@ Step 18 — Keep your repository in sync
   3.  Add your changes:
       git add .
   4.  Commit your changes:
-      git commit -m "Update v3.6.8"
+      git commit -m "Update v3.14.0"
   5.  Push to GitHub:
       git push
 

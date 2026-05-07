@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.13.0** — [Changelog](#-changelog)
+**Current version: v3.14.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,15 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.14.0 — May 7, 2026
+**Quota Hardening & Data Integrity (Round 2)**
+- **Live scorecard overs restored**: When CricAPI returned an empty `data.score` array, the fallback path that rebuilt scores from `scorecard` recovered runs (sum batting + extras) and wickets (sum bowling) but had no fallback for overs — leaving live overs stuck at 0.0 while the rest of the score looked correct. `mappedFromSc` now sums bowler overs in cricket notation; an additional pass backfills a stale `o` from the scorecard mapping when the API returns r/w without overs.
+- **Player-name Firestore dot-path fix**: IPL squad imports from `fantasySquad`/`match_info`/`match_squad` pushed names like `K.L. Rahul` and `M.S. Dhoni` verbatim into the player pool. Those names were used in dot-paths (`stats.${name}.bat_runs`, `playerStatus.${name}`), where Firestore interprets `.` as a nested-key separator — silently scattering a single player's stats across nested objects. New `sanitizePlayerName()` strips Firestore-unsafe chars at every push site in `loadMatchPlayers`. (Existing corrupted documents are not migrated; this only prevents new writes.)
+- **Exponential backoff on `adminFetchXI`**: Replaced fixed 20s × 20 attempts (~20 quota burned in 7 min when CricAPI is slow) with chained `setTimeout`s at 20s → 30s → 45s → 67s → 90s (capped), max 12 attempts. Worst-case quota drops from ~20 to ~12 calls.
+- **Per-tick ticker leadership verification**: Leader election only ran at startup; once two tabs both passed `_shouldStartTicker()` in a race, both kept polling `currentMatches` every 5 min in parallel forever (the 4:52/4:54/4:57/4:59 alternating pattern in API logs). `fetchGlobalTicker` now re-reads localStorage each tick and clears its own interval if another tab now holds a fresh claim.
+- **Cross-resume coalescer floor**: `_startTickerIfNeeded` fired `fetchGlobalTicker` immediately on every call — so each visibility-resume / Firestore-snapshot replay burned a fresh `currentMatches` request even when the same tab fetched 30 s earlier. Last-fetch timestamp now lives in localStorage (`cric_ticker_last_fetch_v1`); the immediate fire is skipped if any tab fetched within the 4-min floor.
+- **Tab-router dedupe**: 4 admin and 5 member tab-routing if-chains were hand-copied across `switchTab`/`switchAdminTab`/`renderAdmin`/`renderMember`/`_doRefresh` and had drifted independently. Replaced with two lookup maps (`_ADMIN_TAB_RENDERERS`, `_MEMBER_TAB_RENDERERS`) and `_renderAdminTabBody`/`_renderMemberTabBody` helpers — pure cleanup, ~80 lines removed.
 
 ### v3.13.0 — May 6, 2026
 **Performance & Quota Hardening (iOS / Android)**
