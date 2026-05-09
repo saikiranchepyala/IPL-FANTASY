@@ -2,18 +2,27 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Matches ──────────────────────────────────────────────────────
+    // Members + admins both update via this path. Non-admin browsers can ONLY
+    // touch fields in the whitelist below (no arbitrary new keys). The previous
+    // `hasAny(['teams'])` clause was bypassable: a payload of {teams: {...},
+    // locked: true, score: []} satisfied hasAny, allowing rogue members to
+    // corrupt match state. Removed — the hasOnly whitelist already permits
+    // legitimate member team writes (which only touch the `teams` top-level key).
     match /matches/{matchId} {
-      allow read: if request.auth != null;
+      allow read:   if request.auth != null;
       allow create: if request.auth != null;
       allow delete: if false;
       allow update: if request.auth != null && (
-        // 1. ADMIN OVERRIDE (using custom claims)
+        // 1. Admin override (custom-claim path — used once role-based auth is wired)
         request.auth.token.admin == true ||
-        
-        // 2. ALLOW BOOSTER UPDATES (by members)
-        request.resource.data.diff(resource.data).affectedKeys().hasAny(['teams']) ||
-        
-        // 3. ADMIN / POLLER UPDATES (Fallback logic if token not yet set)
+
+        // 2. Whitelist of legal fields. Members touching only `teams.*` pass here
+        //    (diff().affectedKeys() = ['teams']). Pollers touching score/stats
+        //    /matchEnded/etc. pass here too. Anything outside the list rejects.
+        //    NOTE: Anonymous auth means a determined member could still write
+        //    whitelisted fields like `locked` from their browser — this is a
+        //    documented limitation pending custom-claims migration.
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
           'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
@@ -25,25 +34,31 @@ service cloud.firestore {
       );
     }
 
-    match /meta/game {
-      allow read: if request.auth != null;
-      // Allow admin updates (like match ID rotation and activeMatchIds updates during finalize)
-      allow write: if request.auth != null; 
-    }
-
-    match /meta/members {
-      allow read: if request.auth != null;
-      allow update: if request.auth != null; 
-    }
-
+    // ── /meta/* ─────────────────────────────────────────────────────
+    // Only known doc IDs are writable: prevents an attacker from creating
+    // arbitrary /meta/<random> docs to spam the database. List matches the
+    // doc IDs the client actually writes (verified by grep of the codebase).
+    // Delete is denied across all of /meta — previously a single
+    // `allow write` permitted anonymous-authed visitors to wipe the league.
     match /meta/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read:   if request.auth != null;
+      allow delete: if false;
+      allow create, update: if request.auth != null && (
+        docId == 'game' ||
+        docId == 'members' ||
+        docId == 'playerProfiles' ||
+        docId.matches('^seasonSquads_[A-Za-z0-9_-]+$') ||
+        docId.matches('^seasonFixtures_[A-Za-z0-9_-]+$')
+      );
     }
 
+    // ── /season/{docId} ──────────────────────────────────────────────
+    // Season totals (cumulative member points). Written by finalizeMatch.
+    // Locked to the single known doc id — no other doc IDs are valid.
     match /season/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null; // Allow saving totals during finalize
+      allow read:   if request.auth != null;
+      allow delete: if false;
+      allow create, update: if request.auth != null && docId == 'totals';
     }
   }
 }

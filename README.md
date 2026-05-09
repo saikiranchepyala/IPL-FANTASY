@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.1** — [Changelog](#-changelog)
+**Current version: v3.15.2** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -67,44 +67,14 @@ The app signs every visitor in silently with Firebase Anonymous Auth before maki
 
 In Firestore → **Rules** tab, replace everything with these rules. All reads and writes require a valid Firebase session (set automatically by the app via anonymous auth):
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
+The current ruleset lives at `firestore.rules` in this repo — copy/paste that file's contents into the rules editor verbatim, then click **Publish**. The headline guarantees:
 
-    match /matches/{matchId} {
-      allow read: if request.auth != null;
-      allow delete: if false; 
-      allow create: if request.auth != null;
-      allow update: if request.auth != null && (
-        request.resource.data.diff(resource.data).affectedKeys().size() == 0
-        || request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['teams', 'stats', 'locked', 'revealed', 'xiReady', 'matchStatus',
-                     'score', 'matchEnded', 'players', 'playerStatus', 'currentBatsmen',
-                     'currentBowler', 'matchResult', 'abandoned', 'finalized',
-                     'tossResult', 'overSummaries', 'label', 'liveMatchId',
-                     't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-                     'matchNum', 'fantasyEnabled', 'createdAt', 'venue'])
-      );
-    }
+- **No deletes anywhere.** Every block declares `allow delete: if false`.
+- **Match updates are field-whitelisted.** Only the keys listed in `affectedKeys().hasOnly([...])` may be written. There is no `hasAny` shortcut — a payload mixing `teams` with arbitrary new keys is rejected.
+- **`/meta/<docId>` is doc-id whitelisted.** Only `game`, `members`, `playerProfiles`, `seasonSquads_<seriesId>`, and `seasonFixtures_<seriesId>` are writable. An attacker cannot spam `/meta/<random>` docs.
+- **`/season/<docId>` is locked to `totals`.**
 
-    match /meta/{docId} {
-      allow read:           if request.auth != null;
-      allow delete:         if false;
-      allow create, update: if request.auth != null && (docId == 'members' || docId == 'game' || docId == 'playerProfiles');
-    }
-
-    match /season/{docId} {
-      allow read:           if request.auth != null;
-      allow delete:         if false;
-      allow create, update: if request.auth != null && docId == 'totals';
-    }
-
-  }
-}
-```
-
-Click **Publish**.
+If you've previously deployed an older ruleset, redeploy the current `firestore.rules` before the next match.
 
 ### Step 3 — Get Firebase Config
 
@@ -323,6 +293,22 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.2 — May 8, 2026
+**Firestore rules security fix (external code review)**
+
+External review of `firestore.rules` surfaced two real exploits reachable by any anonymous-authed visitor. Both fixed; **rules must be redeployed via Firebase Console** before next match.
+
+- **CRITICAL — `hasAny` bypass on match updates.** The match-update rule had:
+  ```
+  request.resource.data.diff(resource.data).affectedKeys().hasAny(['teams']) ||
+  request.resource.data.diff(resource.data).affectedKeys().hasOnly([...whitelist])
+  ```
+  Because `hasAny(['teams'])` returns true whenever the payload includes `teams`, a malicious member could submit `{teams.X.players: [...], locked: true, matchEnded: true, score: []}` — the first clause short-circuits to ALLOW, the whitelist check never runs, and the entire payload commits. Any logged-in member could corrupt match state, force-finalize, or clear the score. Removed the `hasAny` clause entirely. Legitimate member team writes still pass via the whitelist (since `teams` is in it). Documented that anonymous auth means a determined member could still write any whitelisted field — that's the same residual limitation noted under Security & Known Limitations, pending custom-claims migration.
+- **CRITICAL — arbitrary deletion of league-wide docs.** `/meta/game`, `/meta/members`, `/meta/{docId}` (wildcard), and `/season/{docId}` were all declared `allow write: if request.auth != null`. In Firestore, `write` includes `create + update + delete`. Combined with anonymous auth, any visitor could `deleteDoc(meta/game)` and wipe the entire league config (admin PIN, join code, API key, active matches), or `deleteDoc(season/totals)` to nuke season standings. The README claimed `allow delete: if false` was in place — it wasn't. Rules now explicitly split into `allow create, update` + `allow delete: if false` for every meta and season block. The matches block already had explicit delete: false (unchanged).
+- **HARDENING — doc-id allowlisting on `/meta` and `/season`.** While fixing the above, also tightened `/meta/{docId}` to only accept the doc IDs the client actually writes (`game`, `members`, `playerProfiles`, `seasonSquads_<seriesId>`, `seasonFixtures_<seriesId>` via regex). `/season/{docId}` is locked to the single id `totals`. Closes off the prior vector where an attacker could spam arbitrary `/meta/<random>` documents.
+
+Code-only changes shipped earlier today (v3.15.0/v3.15.1) are unaffected; this is a server-side rules patch only. Deploy order: doesn't matter — the rule changes only DENY actions the legitimate client never performed.
 
 ### v3.15.1 — May 8, 2026
 **Post-review hardening (three real bugs caught before deploy)**

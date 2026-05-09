@@ -76,11 +76,12 @@ The JS is organized into logical sections separated by comment banners:
 
 ## Security Rules
 
-`firestore.rules` is version-controlled at repo root. Key constraints:
+`firestore.rules` is version-controlled at repo root. Key constraints (current as of v3.15.2):
 - All reads/writes require `request.auth != null` (Firebase Anonymous Auth)
-- Deletes are blocked (`allow delete: if false`) on all collections
-- Match updates are field-whitelisted via `affectedKeys().hasAny([...])`
-- Meta writes restricted to known doc IDs (`members`, `game`, `playerProfiles`)
+- Deletes are blocked (`allow delete: if false`) on every collection — `matches`, all of `meta/*`, and `season/*`
+- Match updates use `affectedKeys().hasOnly([...])` (NOT `hasAny`) to restrict the write to a known field whitelist
+- `/meta/{docId}` only accepts the IDs the client actually uses: `game`, `members`, `playerProfiles`, plus regex-matched `seasonSquads_<seriesId>` and `seasonFixtures_<seriesId>`
+- `/season/{docId}` is locked to the single id `totals`
 
 **Known limitation**: Anonymous auth means any visitor who loads the page satisfies `request.auth != null`. Write authorization is effectively open — there is no server-side enforcement of admin-only operations. PIN hashing protects against passive DB reads but not against direct Firestore writes. Proper fix requires Firebase custom claims + role-checked rules via a Cloud Function.
 
