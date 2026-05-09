@@ -3971,7 +3971,7 @@
         if (!cached) {
           // Trigger an async load and re-render on completion.
           loadSeasonFixtures(seriesId).then((data) => {
-            if (data) renderSchedule();
+            if (data) window.renderSchedule();
           });
           return `
             <div class="empty-state">
@@ -8745,7 +8745,7 @@
           _seasonFixturesCache[sid] = payload;
           toast(`✅ ${payload.matchList.length} fixtures cached`, "ok");
           // Re-render Schedule tab if it's open
-          if (typeof renderSchedule === "function") renderSchedule();
+          if (typeof window.renderSchedule === "function") window.renderSchedule();
         } catch (e) {
           console.warn("[refreshSeasonFixtures] failed:", e.message);
           toast("Fixture refresh failed: " + e.message, "err");
