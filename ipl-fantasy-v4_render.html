@@ -2022,7 +2022,10 @@
       // so "KL Rahul" still matches a "K.L. Rahul" entry from the API.
       function sanitizePlayerName(raw) {
         if (!raw) return "";
-        return String(raw).replace(/[.\[\]#$/]/g, "").replace(/\s+/g, " ").trim();
+        // Strip Firestore-unsafe chars (.[]#$/) and quote chars that would break inline
+        // onclick handlers like onclick="openPlayerProfile('${name}')" — names like
+        // "O'Brien" would otherwise prematurely close the JS string.
+        return String(raw).replace(/[.\[\]#$/'"`]/g, "").replace(/\s+/g, " ").trim();
       }
 
       function pinVal(sel) {
@@ -3373,12 +3376,8 @@
         if (!inn1 && !inn2)
           return `<div class="empty-state" style="padding:32px 0"><div class="es-icon">🏏</div><p class="muted">Stats will appear once the first ball is bowled.</p></div>`;
 
-        const winnerLine = liveEnd
-          ? (match.apiMatchWinner
-              ? `🏆 ${escHtml(match.apiMatchWinner)} won`
-              : (match.matchResult ? escHtml(match.matchResult) : "")
-            )
-          : "";
+        // matchResult is the whitelisted field that captures CricAPI's status / explicit winner.
+        const winnerLine = liveEnd && match.matchResult ? `🏆 ${escHtml(match.matchResult)}` : "";
         const statusChip = liveEnd
           ? `<div class="lsv-status-chip lsv-chip-end">FINAL${winnerLine ? ` · <span class="lsv-winner">${winnerLine}</span>` : ""}</div>`
           : isLive
@@ -8638,7 +8637,11 @@
           const snap = await getDoc(doc(db, "meta", "seasonSquads_" + seriesId));
           if (snap.exists()) {
             const idx = _buildSquadIndex(snap.data());
-            _seasonSquadCache[seriesId] = idx;
+            // Only cache non-empty indexes — a transient malformed-doc read shouldn't
+            // permanently disable avatar lookups for the session.
+            if (Object.keys(idx).length > 0) {
+              _seasonSquadCache[seriesId] = idx;
+            }
             return idx;
           }
         } catch (e) {
@@ -10429,16 +10432,14 @@
             });
           }
           const matchStatus = data.data?.status || "";
-          // Capture explicit matchWinner from CricAPI when present — cleaner than parsing the status string.
+          // CricAPI exposes an explicit data.matchWinner ("LSG") which is cleaner than parsing
+          // the status string. We fold it into the existing matchResult field rather than
+          // adding a new key — Firestore rules whitelist matchResult but not new fields.
           const apiWinner = (data.data?.matchWinner || "").trim();
           if (scoreArr.length) statsUpdate["score"] = scoreArr;
           if (matchStatus) statsUpdate["matchStatus"] = matchStatus;
-          if (apiWinner) {
-            statsUpdate["apiMatchWinner"] = apiWinner;
-            // Backfill matchResult only if not already set by infoRes path
-            if (!activeMatchData?.matchResult) {
-              statsUpdate["matchResult"] = matchStatus || apiWinner;
-            }
+          if (apiWinner && !activeMatchData?.matchResult) {
+            statsUpdate["matchResult"] = matchStatus || `${apiWinner} won`;
           }
           if (overSummaries.length)
             statsUpdate["overSummaries"] = overSummaries;
