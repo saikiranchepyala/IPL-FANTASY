@@ -9936,6 +9936,16 @@
               if (fbScore.length)  fbUpdate["score"]       = fbScore;
               if (fbStatus)        fbUpdate["matchStatus"] = fbStatus;
 
+              // match_info also carries tossWinner/tossChoice once the toss is announced —
+              // capture them here so the tossResult banner populates even when scorecard
+              // hasn't been published yet (the typical 2–5 min post-toss window).
+              const fbToss = (infoFallback.data?.tossWinner || "").trim();
+              if (fbToss && !activeMatchData?.tossResult) {
+                const shortToss = resolveTeamKey(fbToss) || fbToss;
+                const fbChoice = infoFallback.data?.tossChoice || "";
+                fbUpdate["tossResult"] = `${shortToss} won toss & opted to ${fbChoice}`;
+              }
+
               // XI detection from match_info players (same status field as scorecard)
               const fbStarters = fbPlayers.filter((p) => p.status === "playing");
               if (fbStarters.length >= 11) {
