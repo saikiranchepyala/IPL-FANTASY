@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.0** — [Changelog](#-changelog)
+**Current version: v3.15.1** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,15 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.1 — May 8, 2026
+**Post-review hardening (three real bugs caught before deploy)**
+
+A comprehensive review of the v3.15.0 additions surfaced three issues. Fixed before the IPL match 52 deployment.
+
+- **CRITICAL: `apiMatchWinner` field was rejected by Firestore rules.** The end-of-match path in `autoFetchStats` wrote a new `apiMatchWinner` key alongside the whitelisted fields, but `firestore.rules` `matches/{matchId}` update rule uses `affectedKeys().hasOnly([...])` — any field outside the list rejects the entire `updateDoc`. Once a match ended, the whole batched write (score, matchEnded, matchResult, …) would have failed silently, breaking finalization. Folded the winner into the already-whitelisted `matchResult` field. The Live Scorecard FINAL chip now reads from `matchResult` instead.
+- **Latent XSS-shaped break: apostrophes in player names.** Inline handlers like `onclick="openPlayerProfile('${escAttr(name)}')"` look safe — `escAttr` converts `'` to `&#39;` — but the browser HTML-decodes attribute values before JS parses them, so `&#39;` becomes a literal `'` and prematurely terminates the JS string. `sanitizePlayerName()` was only stripping `[.\[\]#$/]`. Now also strips `' " \`` so a future "O'Brien"-style cricketer doesn't break clicks (no current IPL 2026 player has an apostrophe; defensive fix).
+- **Empty-cache lock-out in `loadSeasonSquadIndex`.** A transient malformed read of `meta/seasonSquads_<id>` would return `{}`, which got memoized in `_seasonSquadCache` and silently disabled all future avatar lookups for the session. Now only caches indexes with at least one entry; transient bad reads retry on the next call.
 
 ### v3.15.0 — May 8, 2026
 **CricketData.org API Audit + Dashboard Lift**
