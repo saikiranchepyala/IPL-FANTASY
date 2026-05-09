@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.14.0** — [Changelog](#-changelog)
+**Current version: v3.15.0** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -323,6 +323,21 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.0 — May 8, 2026
+**CricketData.org API Audit + Dashboard Lift**
+
+After auditing every endpoint cricketdata.org publishes against the live IPL 2026 payload (series id `87c62aac-…`, 74 matches, 10 squads), the dashboard picked up new data sources, dropped a quietly-broken one, and gained a few member-visible features.
+
+- **Removed dead `fantasySquad` call**: `loadMatchPlayers` was hitting `/v1/fantasySquad` on every match-load, but that endpoint requires the paid Fantasy plan and silently returned `{ status: "failure", reason: "Invalid API requested" }` on the free tier. The fallback chain hid the failure — meaning every player's `credits` field was `null` regardless of the original intent, and one quota call was wasted per load. `match_squad` is now the primary roster source with `match_info.teamInfo[].players` as fallback.
+- **Season Squad cache (`series_squad`)**: One call returns all 10 IPL franchises with ~250 players, photos, country, and batting/bowling style. Cached in Firestore at `meta/seasonSquads_<seriesId>` with an in-memory hot tier. New admin button **↻ Refresh Squads** under League Setup → 📦 Season Cache. `loadMatchPlayers` consults the cache to enrich roster entries with `playerImg` etc. — meaning per-match fetches no longer have to re-resolve the same data.
+- **Season Fixtures cache (`series_info`)**: Single call caches the full 74-match IPL 2026 schedule at `meta/seasonFixtures_<seriesId>`. Powers a new member-visible **Schedule** tab with summary stats (Total / Played / Live / Upcoming) and three sections (Live → Upcoming → Completed) showing match #, date, teams, venue, score, and result. Free to render after the one cached call.
+- **Server-side quota reconciliation**: `_cricFetch` now reads `info.hitsToday` from every successful response and raises (never lowers) the local localStorage counter to that value. Multi-tab and multi-device drift no longer let the league overrun the 2000/day budget; the 1800-warning and 2000-stop thresholds also fire from server values.
+- **Player avatars across the dashboard**: New `avatarHtml(player, size)` helper renders the `playerImg` URL with an initials-fallback `<span>` injected by `onerror`. Wired into the admin Player Stats grid card and the member Player Stats card, both now clickable to open the existing Player Profile modal. The on-card thumbnail in `renderGrid` (My Team picker) prefers cached `playerImg` over the synthesized `https://h.cricapi.com/img/players/<id>.jpg` URL — fewer 404s.
+- **Player Profile modal — richer**: `players_info` now caches `playerImg`, `dateOfBirth`, and `placeOfBirth` in addition to career stats. Modal shows the photo + age + place of birth alongside the existing role/style line, and the career-stats section adds **ODI** and **Test** rows alongside the existing IPL and T20I blocks.
+- **Live scorecard `matchWinner` + bowling extras**: `match_scorecard` parser now captures the explicit `data.matchWinner` field (saved as `apiMatchWinner`) and surfaces it in the FINAL chip (e.g. `FINAL · 🏆 LSG won`) instead of relying on the status-string regex. Bowling row gets a `wd`/`nb` annotation when those values are present, and both scorecard parsers now persist `wd`/`nb` per bowler.
+- **Historic IPL series wiring**: `IPL_HISTORIC_SERIES` constant maps 2022/2023/2024/2025 to their CricAPI series ids. `window.cacheHistoricIPLSeason(year)` warms `seasonSquads_<id>` + `seasonFixtures_<id>` for any of them — backed by four admin buttons in the Season Cache card. Sets up future head-to-head views without burning quota by default.
+- **CSP**: `netlify.toml` `img-src` now allows `https://g.cricapi.com` (team logos) alongside the existing `h.cricapi.com` (player photos).
 
 ### v3.14.0 — May 7, 2026
 **Quota Hardening & Data Integrity (Round 2)**

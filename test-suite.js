@@ -707,14 +707,16 @@ async function runAllTests() {
     assert("leaves clean names untouched",
       sanitizePlayerName("Virat Kohli") === "Virat Kohli");
 
-    // Wired into all three loadMatchPlayers ingestion paths
+    // Wired into both loadMatchPlayers ingestion paths (match_squad primary +
+    // match_info.teamInfo fallback). The legacy fantasySquad path was removed
+    // in v3.15 — the endpoint is paid-tier-only and silently failed on free.
     const importBlock = html.slice(
       html.indexOf("async function loadMatchPlayers"),
       html.indexOf("async function loadMatchPlayers") + 4000
     );
     const sanitizeCalls = (importBlock.match(/sanitizePlayerName\(/g) || []).length;
     assert("loadMatchPlayers calls sanitizePlayerName at every push site",
-      sanitizeCalls >= 3, `found ${sanitizeCalls} calls (expected ≥3)`);
+      sanitizeCalls >= 2, `found ${sanitizeCalls} calls (expected ≥2)`);
   } catch (e) {
     assert("Player-name sanitization audit failed", false, e.message);
   }
