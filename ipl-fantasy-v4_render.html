@@ -4339,11 +4339,13 @@
 
           const sr = fmtSR(r, b);
           const isDuck = s.batted && !no && r === 0;
+          const dismissal = (s.bat_dismissal || "").trim();
           return `
             <div class="hsc-bat-row${isDuck ? " hsc-row-duck" : ""}">
               <span class="hsc-col-name">
                 <span class="hsc-batter-name">${escHtml(name)}${no ? '<span class="hsc-no">*</span>' : ""}</span>
                 ${fld ? `<span class="hsc-fld">${fld}</span>` : ""}
+                ${dismissal ? `<span class="hsc-dismissal">${escHtml(dismissal)}</span>` : ""}
               </span>
               <span class="hsc-col-r">
                 <span class="hsc-runs ${runsClass(r)}">${r ?? "–"}</span>
