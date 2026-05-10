@@ -4085,6 +4085,15 @@
           });
         });
 
+        // Sort by match number parsed from the label (e.g. "RR vs GT, 52nd Match"
+        // → 52). Ascending so members see Match 1 → Match N. Playoff matches
+        // ("Qualifier 1", "Final") have no number — they sort to the end.
+        const _matchNumOf = (label) => {
+          const mm = (label || "").match(/(\d+)\s*(?:st|nd|rd|th)?\s+match/i);
+          return mm ? parseInt(mm[1], 10) : Number.MAX_SAFE_INTEGER;
+        };
+        matches.sort((a, b) => _matchNumOf(a.label) - _matchNumOf(b.label));
+
         if (!matches.length)
           return `
           <div class="empty-state">
