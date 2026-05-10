@@ -9914,6 +9914,7 @@
         // Guard: Do not poll or write to finalized matches
         if (activeMatchData.finalized) {
           console.log(`[autoFetchStats] Skipping ${activeMid} — match already finalized`);
+          if (showFeedback) toast("Match is finalized — stats are locked. Reset finalize to re-poll.", "info");
           return;
         }
 
