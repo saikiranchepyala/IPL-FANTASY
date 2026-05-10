@@ -3281,12 +3281,16 @@
           const isDuck    = s.batted && !no && r === 0;
           const isCurrent = isLive && liveBatNames.has(name);
           const fld = [(s.catches||0) > 0 ? `${s.catches}ct`:"", (s.stumpings||0) > 0 ? `${s.stumpings}st`:"", (s.runOutDirect||0)+(s.runOutIndirect||0) > 0 ? "RO":""].filter(Boolean).join(" ");
+          // Cricinfo-style dismissal line. Falls back to the * mark if older match docs
+          // don't have bat_dismissal yet (pre-v3.15.4 finalized matches).
+          const dismissal = (s.bat_dismissal || "").trim();
           return `
             <div class="hsc-bat-row${isDuck?" hsc-row-duck":""}${isCurrent?" lsv-live-row":""}">
               <span class="hsc-col-name">
                 <span class="hsc-batter-name">${escHtml(name)}${no?'<span class="hsc-no">*</span>':""}</span>
                 ${isCurrent?'<span class="lsv-live-dot">●</span>':""}
                 ${fld?`<span class="hsc-fld">${fld}</span>`:""}
+                ${dismissal?`<div class="hsc-dismissal">${escHtml(dismissal)}</div>`:""}
               </span>
               <span class="hsc-col-r"><span class="hsc-runs ${runsClass(r)}">${r??'–'}</span></span>
               <span class="hsc-col-b hsc-dim">${b??'–'}</span>
@@ -6860,6 +6864,7 @@
                 sixes: 0,
                 batted: false,
                 notOut: false,
+                dismissalText: "",
               };
             batAcc[n].runs += runs;
             batAcc[n].balls += balls;
@@ -6867,6 +6872,8 @@
             batAcc[n].sixes += b["6s"] || 0;
             batAcc[n].batted = true;
             batAcc[n].notOut = !dismissed;
+            const dt = (b["dismissal-text"] || "").trim();
+            if (dt) batAcc[n].dismissalText = dt;
           });
           (inn.bowling || []).forEach((bw) => {
             const m = robustMatch(bw.bowler?.name || bw.name || "", pool, nl, nlKeys);
@@ -6939,6 +6946,7 @@
             bat_4s: s.fours,
             bat_6s: s.sixes,
             bat_notOut: s.notOut,
+            bat_dismissal: s.dismissalText || "",
             batted: s.batted,
             // Nullify legacy un-prefixed fields to clear any prior corruption
             runs: null,
@@ -6952,6 +6960,7 @@
           statsUpdate[`stats.${n}.bat_4s`] = s.fours;
           statsUpdate[`stats.${n}.bat_6s`] = s.sixes;
           statsUpdate[`stats.${n}.bat_notOut`] = s.notOut;
+          statsUpdate[`stats.${n}.bat_dismissal`] = s.dismissalText || "";
           statsUpdate[`stats.${n}.batted`] = s.batted;
           // Explicitly nullify legacy fields in Firestore
           statsUpdate[`stats.${n}.runs`] = null;
@@ -10232,6 +10241,7 @@
                   sixes: 0,
                   batted: false,
                   notOut: false,
+                  dismissalText: "",
                 };
               batAcc[n].runs += runsScored;
               batAcc[n].balls += ballsFaced;
@@ -10240,6 +10250,11 @@
               batAcc[n].batted = true;
               // notOut: empty/null = not out; "not out" = not out; "Retired hurt" = not out; anything else = dismissed
               batAcc[n].notOut = batAcc[n].notOut || !dismissed;
+              // Capture cricinfo-style dismissal line (e.g. "c Jofra Archer b Yash Raj Punja",
+              // "b Rashid Khan", "lbw b Rashid Khan", "not out"). Last innings wins on
+              // multi-innings batsmen (super over) so the most recent dismissal is shown.
+              const dt = (b["dismissal-text"] || "").trim();
+              if (dt) batAcc[n].dismissalText = dt;
               updated++;
             });
             (inn.bowling || []).forEach((bw) => {
@@ -10317,6 +10332,7 @@
               bat_4s: bstats.fours,
               bat_6s: bstats.sixes,
               bat_notOut: bstats.notOut,
+              bat_dismissal: bstats.dismissalText || "",
               batted: true,
             };
           });
@@ -15153,6 +15169,15 @@
             .hsc-wkt-haul { color: #fb923c; font-size: 15px; }
             .hsc-no       { color: #4ade80; margin-left: 1px; font-size: 15px; }
             .hsc-fld      { font-size: 10px; color: var(--muted2); font-family: 'Barlow', sans-serif; }
+            .hsc-dismissal {
+              display: block;
+              margin-top: 2px;
+              font-size: 11px;
+              color: var(--muted2);
+              font-family: 'Barlow', sans-serif;
+              font-style: italic;
+              letter-spacing: 0.2px;
+            }
             .hsc-hi       { color: #34d399; font-weight: 700; }
             .hsc-lo       { color: #f87171; font-weight: 700; }
 

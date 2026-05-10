@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.3** — [Changelog](#-changelog)
+**Current version: v3.15.4** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,17 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.4 — May 9, 2026
+**Cricinfo-style dismissal lines on the live scorecard**
+
+The scorecard tab was rendering only batter stats + a fielding chip on the helper (`1ct`, `1st`). Members couldn't tell HOW each batter got out from the dashboard — they had to cross-reference the actual broadcast scorecard. CricAPI's `match_scorecard` payload already includes a `dismissal-text` field per batter (`"c Jofra Archer b Yash Raj Punja"`, `"b Rashid Khan"`, `"lbw b Rashid Khan"`, `"not out"`, etc.) — we just weren't capturing or displaying it.
+
+- **Parser**: both autoFetchStats (live polling) and the JSON-paste path now write `bat_dismissal` per player into Firestore.
+- **Renderer**: `renderLiveStatsView` shows the dismissal line as a small italic subtitle under the batter's name (`hsc-dismissal` class). Older finalized matches (pre-v3.15.4) won't have the field stored — they fall back to just the `*` marker for not-out batsmen, no regressions.
+- **No rules change needed**: the new `bat_dismissal` field is written under `stats.<name>.bat_dismissal`, which is a nested update of the already-whitelisted `stats` top-level key.
+
+To see dismissal text on a finalized match that completed before this build was deployed, click **⚡ Fetch Now** on it — the next poll cycle parses and stores the dismissal lines from the (still-cached) scorecard payload.
 
 ### v3.15.3 — May 9, 2026
 **Mid-match-day fixes from external static-analysis review**
