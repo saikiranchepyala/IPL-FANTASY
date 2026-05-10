@@ -10702,15 +10702,30 @@
           if (ended && !activeMatchData?.finalized) {
             _handleMatchEnd(activeMid);
           }
+          // Successful path through autoFetchStats — reset the consecutive-failure
+          // counter so the stale-data toast threshold rearms for the next outage.
+          _autoFetchFailStreak = 0;
         } catch (e) {
           if (showFeedback) toast("Error: " + e.message, "err");
           console.warn("Auto-fetch failed:", e.message);
+          // Background polls (showFeedback=false) usually stay quiet by design — a
+          // single API blip every minute shouldn't spam the admin. But if 3+ polls
+          // fail in a row we surface ONE toast so the admin knows live stats are
+          // stale. Re-arms after the next successful fetch.
+          if (!showFeedback) {
+            _autoFetchFailStreak++;
+            if (_autoFetchFailStreak === AUTOFETCH_FAIL_TOAST_THRESHOLD) {
+              toast(`⚠️ Live stats sync failing (${AUTOFETCH_FAIL_TOAST_THRESHOLD} polls). Check API key / network.`, "err");
+            }
+          }
         }
         // ── end of main body ──
         } finally {
           _autoFetchRunning.delete(activeMid);
         }
       }
+      let _autoFetchFailStreak = 0;
+      const AUTOFETCH_FAIL_TOAST_THRESHOLD = 3;
 
       // ── Pre-Match XI Auto-Watcher ──
       // Silently polls match_scorecard every 90s in the pre-match window (toss → first ball).
@@ -11420,9 +11435,14 @@
           dd.classList.toggle("open");
         });
 
-        document.addEventListener("click", function () {
-          dd.classList.remove("open");
-        });
+        // NOTE: the "click outside closes the dropdown" handler used to live here.
+        // Moved to initTheme() so it registers exactly once at page load. The nav
+        // re-renders via innerHTML on every refreshView (60+ times per match), and
+        // each re-render minted a new themeToggleBtn — bypassing the _themeBound
+        // guard and stacking another listener on the global document. Over a 4hr
+        // match that's hundreds of duplicate handlers firing on every click.
+        // Listeners on btn / dd themselves are fine — those nodes are GC'd with
+        // the old DOM subtree.
 
         dd.addEventListener("click", function (e) {
           e.stopPropagation();
@@ -11449,6 +11469,16 @@
         let theme = VALID_THEMES.includes(saved) ? saved : "midnight";
         document.documentElement.setAttribute("data-theme", theme);
         document.body.setAttribute("data-theme", theme);
+
+        /* Single document-level click listener — closes the dropdown when clicking
+         * outside. Registered once at init so that nav re-renders (which mint new
+         * themeToggleBtn nodes and fall through the per-button _themeBound guard)
+         * don't stack duplicate handlers on the global document. Always reads the
+         * CURRENT dropdown by id so it works after nav re-renders. */
+        document.addEventListener("click", function () {
+          const dd = document.getElementById("themeDropdown");
+          if (dd) dd.classList.remove("open");
+        });
 
         /* Re-bind toggle whenever the nav is re-rendered into DOM */
         let observer = new MutationObserver(function () {

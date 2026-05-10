@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.2** — [Changelog](#-changelog)
+**Current version: v3.15.3** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,14 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.3 — May 9, 2026
+**Mid-match-day fixes from external static-analysis review**
+
+External code review surfaced one real memory leak and one observability gap. Both fixed pre-match-52.
+
+- **CRITICAL — global click-listener leak in `bindToggle()`.** The theme dropdown's "click outside closes" listener was attached to `document` from inside `bindToggle()`. The MutationObserver had a `btn._themeBound` guard, but that guard only protects against re-binding the *same* button instance — it doesn't fire when an `innerHTML` re-render replaces the nav and mints a fresh `themeToggleBtn` node. Each re-render therefore stacked another listener on the global `document`. Over a 4-hour live session with regular `refreshView`s (60+ re-renders typical), hundreds of duplicate handlers accumulated, draining mobile battery and adding click latency. Moved the document-level listener to `initTheme()` so it registers exactly once at page load; the per-button and per-dropdown listeners stay inside `bindToggle()` (those nodes are GC'd cleanly with the old DOM subtree). The listener now reads the current dropdown via `getElementById` on each click so it remains correct after re-renders.
+- **HIGH — silent extended API outage in background polling.** `autoFetchStats` already toasted errors when called with `showFeedback=true` (manual ⚡ Fetch Now button), but background polls (`showFeedback=false`, fired every 60s by `startAR`) intentionally stayed silent — a single transient blip shouldn't spam the admin every minute. The gap: if CricAPI failed for an extended period (3+ consecutive polls = 3+ minutes), the admin saw no signal and could think live stats were current. Added `_autoFetchFailStreak` counter; on the 3rd consecutive background failure, a single toast surfaces (`⚠️ Live stats sync failing (3 polls). Check API key / network.`). Counter resets on the next successful fetch, so the toast re-arms for the next outage and doesn't spam during one.
 
 ### v3.15.2 — May 8, 2026
 **Firestore rules security fix (external code review)**
