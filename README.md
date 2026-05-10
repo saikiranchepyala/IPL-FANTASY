@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.4** — [Changelog](#-changelog)
+**Current version: v3.15.5** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,17 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.5 — May 9, 2026
+**Match-day polish: scorecard dismissals, history sort, fetch feedback**
+
+Several iterative fixes from match-day usage:
+
+- **Dismissal display fixed across both scorecard renderers.** v3.15.4 added the dismissal line, but the patch only landed in `renderLiveStatsView` (the live in-progress tab). The `renderMatchStatsView` used by **finalized-match scorecards** (History tab → click into a match) still wasn't showing dismissals. Patched the second renderer too. Also fixed an HTML nesting bug where a `<div>` was placed inside a `<span>` — browsers auto-close the parent span on a block-level child, which silently hid the dismissal line. Replaced with `<span class="hsc-dismissal">` styled `display: block`.
+- **Catcher/bowler names rendered prominently.** Refined the metadata line for clear readability: full catcher and bowler names (no abbreviations), bright off-white text (`var(--text)` at 88% opacity instead of the previous muted grey), 12.5px font weight 500. Fielding chip and dismissal merge into one line under the name (`1ct · c Tushar Deshpande b Brijesh Sharma`). The redundant "not out" line is filtered out since the `*` suffix on the batter name already conveys it. Hover/long-press exposes the full text via the `title` attribute.
+- **History tab sorted in match-number order.** The History tab was rendering matches in `seasonTotals` iteration order, which felt random. Now parses the match number from each label (`"RR vs GT, 52nd Match"` → 52) via regex and sorts ascending — Match 1 first, Match N last. Playoff matches (`Qualifier 1`, `Final`) without a number prefix fall to the end of the list.
+- **Fetch Now no longer silent on finalized matches.** `autoFetchStats` had a guard `if (activeMatchData.finalized) return;` to prevent overwriting locked stats. The guard fired even on manual `⚡ Fetch Now` clicks (`showFeedback=true`), making the button look broken. Added a toast: `"Match is finalized — stats are locked. Reset finalize to re-poll."`. Background polls (`showFeedback=false`) stay silent as before.
+- **Toss extracted from `match_info` fallback.** When the scorecard endpoint is unavailable (the typical 2–5 min window between toss announcement and CricAPI publishing the scorecard), `autoFetchStats` falls back to `match_info`. The fallback path was capturing score, status, and players list, but ignoring `tossWinner` / `tossChoice`. Added — so the toss banner ("RR won toss & opted to bowl") populates immediately after toss instead of waiting for the scorecard to come online.
 
 ### v3.15.4 — May 9, 2026
 **Cricinfo-style dismissal lines on the live scorecard**
