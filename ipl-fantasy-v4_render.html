@@ -11346,27 +11346,15 @@
       }
       const escHtml = escAttr; // alias — same escaping covers both contexts
 
-      // Compact cricinfo-style dismissal text. Drops first/middle names so the
-      // metadata line stays tight on mobile. Full dismissal is preserved as a
-      // `title` attribute by callers for hover/long-press tooltips.
+      // Normalise the dismissal text for display. Keeps the full catcher / bowler
+      // names ("c Tushar Deshpande b Brijesh Sharma") for readability — the user
+      // explicitly asked for visible names, not abbreviated. Only filters out
+      // the redundant "not out" since the * suffix on the batter name already
+      // conveys it.
       function _shortDismissal(text) {
         if (!text) return "";
-        const lastName = (full) => {
-          const parts = full.trim().split(/\s+/).filter(Boolean);
-          return parts.length ? parts[parts.length - 1] : full;
-        };
-        let r = text.trim();
-        // Hide the redundant "not out" — the * after the batter name already conveys it.
+        const r = text.trim();
         if (/^not\s+out$/i.test(r)) return "";
-        // "c First Last b First Last" → "c Last b Last"
-        r = r.replace(/^c\s+(.+?)\s+b\s+(.+)$/i, (_, c, b) => `c ${lastName(c)} b ${lastName(b)}`);
-        // "st First Last b First Last" → "st Last b Last"
-        r = r.replace(/^st\s+(.+?)\s+b\s+(.+)$/i, (_, s, b) => `st ${lastName(s)} b ${lastName(b)}`);
-        // "lbw b First Last" → "lbw b Last"
-        r = r.replace(/^lbw\s+b\s+(.+)$/i, (_, b) => `lbw b ${lastName(b)}`);
-        // "b First Last" → "b Last" (must run after lbw / c b / st b — guarded by ^b\s)
-        r = r.replace(/^b\s+(.+)$/i, (_, b) => `b ${lastName(b)}`);
-        // run-out / hit-wicket / retired / etc. pass through unchanged.
         return r;
       }
 
@@ -15218,18 +15206,22 @@
             .hsc-wkt-haul { color: #fb923c; font-size: 15px; }
             .hsc-no       { color: #4ade80; margin-left: 1px; font-size: 15px; }
             .hsc-fld      { font-size: 10px; color: var(--muted2); font-family: 'Barlow', sans-serif; }
-            /* Combined fielding chip + shortened dismissal under the batter's name.
-             * One tight italic line — keeps the row vertically compact. Hover/long-press
-             * reveals the full dismissal text via the title attribute. */
+            /* Combined fielding chip + dismissal line under the batter's name.
+             * Sized + coloured for readability — full catcher/bowler names visible
+             * at a glance. Hover/long-press exposes the full text via the title
+             * attribute. flex-basis:100% forces it to its own line inside the
+             * wrapping col-name flex container so it doesn't squeeze the name. */
             .hsc-meta-line {
               display: block;
-              margin-top: 1px;
-              font-size: 11px;
-              line-height: 1.3;
-              color: var(--muted2);
+              flex-basis: 100%;
+              margin-top: 3px;
+              font-size: 12.5px;
+              line-height: 1.4;
+              color: var(--text);
               font-family: 'Barlow', sans-serif;
-              font-style: italic;
-              letter-spacing: 0.2px;
+              font-weight: 500;
+              letter-spacing: 0.15px;
+              opacity: 0.88;
               cursor: help;
             }
             /* Legacy class — kept for safety in case any code path still emits it. */
