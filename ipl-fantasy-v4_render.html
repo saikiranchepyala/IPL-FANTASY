@@ -3281,16 +3281,23 @@
           const isDuck    = s.batted && !no && r === 0;
           const isCurrent = isLive && liveBatNames.has(name);
           const fld = [(s.catches||0) > 0 ? `${s.catches}ct`:"", (s.stumpings||0) > 0 ? `${s.stumpings}st`:"", (s.runOutDirect||0)+(s.runOutIndirect||0) > 0 ? "RO":""].filter(Boolean).join(" ");
-          // Cricinfo-style dismissal line. Falls back to the * mark if older match docs
-          // don't have bat_dismissal yet (pre-v3.15.4 finalized matches).
+          // Compact cricinfo-style dismissal + fielding into one tight meta line
+          // under the batter's name. Full dismissal text exposed via title= for
+          // hover (desktop) / long-press (mobile).
           const dismissal = (s.bat_dismissal || "").trim();
+          const shortDis  = _shortDismissal(dismissal);
+          const metaParts = [];
+          if (fld) metaParts.push(fld);
+          if (shortDis) metaParts.push(shortDis);
+          const metaLine = metaParts.length
+            ? `<span class="hsc-meta-line"${dismissal?` title="${escAttr(dismissal)}"`:""}>${escHtml(metaParts.join(" · "))}</span>`
+            : "";
           return `
             <div class="hsc-bat-row${isDuck?" hsc-row-duck":""}${isCurrent?" lsv-live-row":""}">
               <span class="hsc-col-name">
                 <span class="hsc-batter-name">${escHtml(name)}${no?'<span class="hsc-no">*</span>':""}</span>
                 ${isCurrent?'<span class="lsv-live-dot">●</span>':""}
-                ${fld?`<span class="hsc-fld">${fld}</span>`:""}
-                ${dismissal?`<span class="hsc-dismissal">${escHtml(dismissal)}</span>`:""}
+                ${metaLine}
               </span>
               <span class="hsc-col-r"><span class="hsc-runs ${runsClass(r)}">${r??'–'}</span></span>
               <span class="hsc-col-b hsc-dim">${b??'–'}</span>
@@ -4349,12 +4356,18 @@
           const sr = fmtSR(r, b);
           const isDuck = s.batted && !no && r === 0;
           const dismissal = (s.bat_dismissal || "").trim();
+          const shortDis  = _shortDismissal(dismissal);
+          const metaParts = [];
+          if (fld) metaParts.push(fld);
+          if (shortDis) metaParts.push(shortDis);
+          const metaLine = metaParts.length
+            ? `<span class="hsc-meta-line"${dismissal ? ` title="${escAttr(dismissal)}"` : ""}>${escHtml(metaParts.join(" · "))}</span>`
+            : "";
           return `
             <div class="hsc-bat-row${isDuck ? " hsc-row-duck" : ""}">
               <span class="hsc-col-name">
                 <span class="hsc-batter-name">${escHtml(name)}${no ? '<span class="hsc-no">*</span>' : ""}</span>
-                ${fld ? `<span class="hsc-fld">${fld}</span>` : ""}
-                ${dismissal ? `<span class="hsc-dismissal">${escHtml(dismissal)}</span>` : ""}
+                ${metaLine}
               </span>
               <span class="hsc-col-r">
                 <span class="hsc-runs ${runsClass(r)}">${r ?? "–"}</span>
@@ -11333,6 +11346,30 @@
       }
       const escHtml = escAttr; // alias — same escaping covers both contexts
 
+      // Compact cricinfo-style dismissal text. Drops first/middle names so the
+      // metadata line stays tight on mobile. Full dismissal is preserved as a
+      // `title` attribute by callers for hover/long-press tooltips.
+      function _shortDismissal(text) {
+        if (!text) return "";
+        const lastName = (full) => {
+          const parts = full.trim().split(/\s+/).filter(Boolean);
+          return parts.length ? parts[parts.length - 1] : full;
+        };
+        let r = text.trim();
+        // Hide the redundant "not out" — the * after the batter name already conveys it.
+        if (/^not\s+out$/i.test(r)) return "";
+        // "c First Last b First Last" → "c Last b Last"
+        r = r.replace(/^c\s+(.+?)\s+b\s+(.+)$/i, (_, c, b) => `c ${lastName(c)} b ${lastName(b)}`);
+        // "st First Last b First Last" → "st Last b Last"
+        r = r.replace(/^st\s+(.+?)\s+b\s+(.+)$/i, (_, s, b) => `st ${lastName(s)} b ${lastName(b)}`);
+        // "lbw b First Last" → "lbw b Last"
+        r = r.replace(/^lbw\s+b\s+(.+)$/i, (_, b) => `lbw b ${lastName(b)}`);
+        // "b First Last" → "b Last" (must run after lbw / c b / st b — guarded by ^b\s)
+        r = r.replace(/^b\s+(.+)$/i, (_, b) => `b ${lastName(b)}`);
+        // run-out / hit-wicket / retired / etc. pass through unchanged.
+        return r;
+      }
+
       // Player avatar — lazy-loaded photo with initials fallback. Pulls from the active match
       // roster (which gets photos from match_squad / cached series_squad). The fallback element
       // is hidden by default and revealed by the img onerror handler when the URL 404s.
@@ -15181,14 +15218,28 @@
             .hsc-wkt-haul { color: #fb923c; font-size: 15px; }
             .hsc-no       { color: #4ade80; margin-left: 1px; font-size: 15px; }
             .hsc-fld      { font-size: 10px; color: var(--muted2); font-family: 'Barlow', sans-serif; }
-            .hsc-dismissal {
+            /* Combined fielding chip + shortened dismissal under the batter's name.
+             * One tight italic line — keeps the row vertically compact. Hover/long-press
+             * reveals the full dismissal text via the title attribute. */
+            .hsc-meta-line {
               display: block;
-              margin-top: 2px;
+              margin-top: 1px;
               font-size: 11px;
+              line-height: 1.3;
               color: var(--muted2);
               font-family: 'Barlow', sans-serif;
               font-style: italic;
               letter-spacing: 0.2px;
+              cursor: help;
+            }
+            /* Legacy class — kept for safety in case any code path still emits it. */
+            .hsc-dismissal {
+              display: block;
+              margin-top: 1px;
+              font-size: 11px;
+              color: var(--muted2);
+              font-family: 'Barlow', sans-serif;
+              font-style: italic;
             }
             .hsc-hi       { color: #34d399; font-weight: 700; }
             .hsc-lo       { color: #f87171; font-weight: 700; }
