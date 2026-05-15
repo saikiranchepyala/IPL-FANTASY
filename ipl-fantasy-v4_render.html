@@ -2006,10 +2006,10 @@
       // ── Shared name validation ──
       // Firestore dot-path notation treats . as a field separator, so names like
       // "J.Smith" corrupt nested writes. Block all Firestore-unsafe characters.
-      const _NAME_BAD_CHARS = /[.\[\]#$/]/;
+      const _NAME_BAD_CHARS = /[.\[\]#$/'"`\\‘’“”]/;
       function validateName(name) {
         if (!name) return "Enter your name";
-        if (_NAME_BAD_CHARS.test(name)) return "Name cannot contain . [ ] # $ / — choose a different name";
+        if (_NAME_BAD_CHARS.test(name)) return "Name cannot contain . [ ] # $ / ' \" ` \\ — choose a different name";
         return null; // valid
       }
 
@@ -2053,7 +2053,7 @@
       }
       // Legacy cutoff: plaintext PINs accepted only until this date, then refused.
       // Gives existing members time to log in and auto-upgrade their PINs.
-      const _PIN_LEGACY_DEADLINE = new Date("2026-05-15T00:00:00Z").getTime();
+      const _PIN_LEGACY_DEADLINE = new Date("2026-06-15T00:00:00Z").getTime();
       // Compare entered PIN against stored value (hashed or legacy plaintext).
       // If legacy match succeeds, auto-upgrades the stored PIN to its hash.
       async function verifyPin(enteredPin, storedPin, salt, upgradeCallback) {
@@ -11337,7 +11337,7 @@
       }
       // Escapes user-controlled strings for safe use inside HTML attributes AND innerHTML contexts.
       function escAttr(s) {
-        return (s || "")
+        return String(s ?? "")
           .replace(/&/g, "&amp;")
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#39;")
