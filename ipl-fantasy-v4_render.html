@@ -2006,7 +2006,7 @@
       // ── Shared name validation ──
       // Firestore dot-path notation treats . as a field separator, so names like
       // "J.Smith" corrupt nested writes. Block all Firestore-unsafe characters.
-      const _NAME_BAD_CHARS = /[.\[\]#$/'"`\\]/;
+      const _NAME_BAD_CHARS = /[.\[\]#$/'"`\\‘’“”]/;
       function validateName(name) {
         if (!name) return "Enter your name";
         if (_NAME_BAD_CHARS.test(name)) return "Name cannot contain . [ ] # $ / ' \" ` \\ — choose a different name";
