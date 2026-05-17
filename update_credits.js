@@ -30,21 +30,26 @@ const updates = {
   "Manav Suthar": 7
 };
 
-let content = fs.readFileSync('ipl-fantasy-v4_render.html', 'utf8');
+const TARGET = 'ipl-fantasy-v4_render.html';
+let content = fs.readFileSync(TARGET, 'utf8');
 
 // Find where PLAYER_CREDITS ends.
 const regex = /const PLAYER_CREDITS = \{([\s\S]*?)\n      \};/;
 const match = content.match(regex);
 
-if (match) {
-  let inner = match[1];
-  
-  // We can just append the new values at the end of the object literal so they override the previous ones
-  let newEntries = "\n\n        // --- GUJARAT TITANS (Verified) ---\n" + Object.entries(updates).map(([k,v]) => `        "${k}": ${v},`).join("\n");
-  
-  content = content.replace(regex, `const PLAYER_CREDITS = {${inner}${newEntries}\n      };`);
-  fs.writeFileSync('ipl-fantasy-v4_render.html', content);
-  console.log("Credits updated successfully!");
-} else {
-  console.log("Could not find PLAYER_CREDITS in file.");
+if (!match) {
+  console.error("ERROR: Could not find PLAYER_CREDITS in file. Aborting (no changes written).");
+  process.exit(1);
 }
+
+let inner = match[1];
+
+// We can just append the new values at the end of the object literal so they override the previous ones
+let newEntries = "\n\n        // --- GUJARAT TITANS (Verified) ---\n" + Object.entries(updates).map(([k,v]) => `        "${k}": ${v},`).join("\n");
+
+const updated = content.replace(regex, `const PLAYER_CREDITS = {${inner}${newEntries}\n      };`);
+
+// Backup the original before overwriting — easy revert if the regex misbehaves.
+fs.writeFileSync(TARGET + '.bak', content);
+fs.writeFileSync(TARGET, updated);
+console.log(`Credits updated. Backup at ${TARGET}.bak`);

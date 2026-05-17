@@ -338,7 +338,10 @@
         const val = parseFloat(ov) || 0;
         if (val <= 0 || val > 100) return 0; // Loose safety guard
         const full = Math.floor(val);
-        const balls = Math.round((val - full) * 10);
+        // Math.floor (not round) — cricket overs are <full>.<balls> with balls 0..5,
+        // never decimals like 3.45. Rounding 3.45 → 4 balls would inflate economy
+        // denominator; flooring preserves the actual ball count CricAPI sent.
+        const balls = Math.floor((val - full) * 10);
         if (balls >= 6) return full + 1; // 4.6 becomes 5.0
         return full + balls / 6;
       }
@@ -447,6 +450,51 @@
           double: saved.double ?? BST_DEFAULTS.double,
           team: saved.team ?? BST_DEFAULTS.team,
         };
+      }
+
+      // Atomic booster swap: refund `savedBooster` (if any) and debit `newBooster`
+      // (if any). Pass newBooster=null to clear; savedBooster=null on first apply.
+      // Throws if the match is locked/finalized at read-time. Returns the new
+      // members map + inventory so callers can sync local state after commit.
+      async function _commitBoosterChange(activeMid, savedBooster, newBooster) {
+        let updatedMems = null;
+        let updatedInv = null;
+        await runTransaction(db, async (transaction) => {
+          const mRef = doc(db, "meta", "members");
+          const matchRef = doc(db, "matches", activeMid);
+          const [mSnap, matchSnap] = await Promise.all([
+            transaction.get(mRef),
+            transaction.get(matchRef),
+          ]);
+          const mems = mSnap.data() || {};
+          const matchData = matchSnap.data() || {};
+          if (matchData.locked || matchData.finalized) {
+            throw new Error("Match is locked — no booster changes allowed");
+          }
+          const inv = { ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }) };
+          if (savedBooster?.type) {
+            inv[savedBooster.type] = Math.min(
+              BST_DEFAULTS[savedBooster.type],
+              (inv[savedBooster.type] ?? 0) + 1,
+            );
+          }
+          if (newBooster?.type) {
+            inv[newBooster.type] = Math.max(
+              0,
+              (inv[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
+            );
+          }
+          transaction.update(matchRef, {
+            [`teams.${session.name}.booster`]: newBooster,
+            [`teams.${session.name}.updatedAt`]: Date.now(),
+          });
+          transaction.set(mRef, {
+            [session.name]: { boosters: inv }
+          }, { merge: true });
+          updatedMems = mems;
+          updatedInv = inv;
+        });
+        return { updatedMems, updatedInv };
       }
 
       function isPlayoffMatch(match) {
@@ -734,44 +782,7 @@
 
         // Auto-save: clear the booster in Firestore + refund inventory
         try {
-          let updatedMems = null;
-          let updatedInv = null;
-
-          await runTransaction(db, async (transaction) => {
-            const mRef = doc(db, "meta", "members");
-            const matchRef = doc(db, "matches", activeMid);
-
-            const [mSnap, matchSnap] = await Promise.all([
-              transaction.get(mRef),
-              transaction.get(matchRef)
-            ]);
-
-            const mems = mSnap.data() || {};
-            const matchData = matchSnap.data() || {};
-
-            if (matchData.locked || matchData.finalized) {
-              throw new Error("Match is locked — no booster changes allowed");
-            }
-
-            const inv = {
-              ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
-            };
-            inv[savedBooster.type] = Math.min(
-              BST_DEFAULTS[savedBooster.type],
-              (inv[savedBooster.type] ?? 0) + 1,
-            );
-
-            transaction.update(matchRef, {
-              [`teams.${session.name}.booster`]: null,
-              [`teams.${session.name}.updatedAt`]: Date.now(),
-            });
-            transaction.set(mRef, {
-              [session.name]: { boosters: inv }
-            }, { merge: true });
-
-            updatedMems = mems;
-            updatedInv = inv;
-          });
+          const { updatedMems, updatedInv } = await _commitBoosterChange(activeMid, savedBooster, null);
 
           if (!updatedMems[session.name]) updatedMems[session.name] = {};
           updatedMems[session.name].boosters = updatedInv;
@@ -874,50 +885,7 @@
         // AUTO-SAVE: team is already submitted — persist booster immediately.
         // This prevents the booster being lost if the member doesn't re-press Lock In.
         try {
-          let updatedMems = null;
-          let updatedInv = null;
-
-          await runTransaction(db, async (transaction) => {
-            const mRef = doc(db, "meta", "members");
-            const matchRef = doc(db, "matches", activeMid);
-            
-            const [mSnap, matchSnap] = await Promise.all([
-              transaction.get(mRef),
-              transaction.get(matchRef)
-            ]);
-
-            const mems = mSnap.data() || {};
-            const matchData = matchSnap.data() || {};
-            
-            if (matchData.locked || matchData.finalized) {
-              throw new Error("Match is locked — no booster changes allowed");
-            }
-
-            const inv = {
-              ...(mems[session.name]?.boosters || { ...BST_DEFAULTS }),
-            };
-            if (savedBooster?.type) {
-              inv[savedBooster.type] = Math.min(
-                BST_DEFAULTS[savedBooster.type],
-                (inv[savedBooster.type] ?? 0) + 1,
-              );
-            }
-            inv[newBooster.type] = Math.max(
-              0,
-              (inv[newBooster.type] ?? BST_DEFAULTS[newBooster.type]) - 1,
-            );
-
-            transaction.update(matchRef, {
-              [`teams.${session.name}.booster`]: newBooster,
-              [`teams.${session.name}.updatedAt`]: Date.now(),
-            });
-            transaction.set(mRef, {
-              [session.name]: { boosters: inv }
-            }, { merge: true });
-
-            updatedMems = mems;
-            updatedInv = inv;
-          });
+          const { updatedMems, updatedInv } = await _commitBoosterChange(activeMid, savedBooster, newBooster);
 
           if (!updatedMems[session.name]) updatedMems[session.name] = {};
           updatedMems[session.name].boosters = updatedInv;
@@ -1236,7 +1204,22 @@
             }
           }
         } catch {}
-      }      async function _cricFetch(url, opts = {}) {
+      }
+
+      // ── CricAPI 429 cooldown (rate-limit backoff) ──
+      // Distinct from daily quota: 429 may mean "you're hitting too fast" (rate
+      // limit) and is usually recoverable in seconds. Without a cooldown, every
+      // background poll within the next 30s also gets a 429, burning quota and
+      // spamming errors. Exponential backoff: 30s → 60s → 120s → 300s cap.
+      let _cricApi429Until = 0;
+      let _cricApi429Streak = 0;
+      const _CRIC_429_BACKOFF_MS = [30000, 60000, 120000, 300000];
+
+      async function _cricFetch(url, opts = {}) {
+        if (Date.now() < _cricApi429Until) {
+          const wait = Math.ceil((_cricApi429Until - Date.now()) / 1000);
+          throw new Error(`CricAPI cooling down (${wait}s left after rate-limit)`);
+        }
         if (!_trackApiCall())
           throw new Error("CricAPI daily quota exhausted (2000 calls)");
 
@@ -1263,10 +1246,23 @@
             signal: controller.signal
           });
           clearTimeout(timeout);
-          if (res.status === 429) throw new Error("CricAPI quota reached (Limit: 2000/day)");
+          if (res.status === 429) {
+            const idx = Math.min(_cricApi429Streak, _CRIC_429_BACKOFF_MS.length - 1);
+            const backoff = _CRIC_429_BACKOFF_MS[idx];
+            _cricApi429Until = Date.now() + backoff;
+            _cricApi429Streak++;
+            const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+            if (retryAfter > 0) _cricApi429Until = Math.max(_cricApi429Until, Date.now() + retryAfter * 1000);
+            throw new Error(`CricAPI rate-limited (HTTP 429) — backing off ${Math.ceil((_cricApi429Until - Date.now()) / 1000)}s (streak ${_cricApi429Streak})`);
+          }
           if (res.status === 401) throw new Error("CricAPI key invalid or expired");
           if (res.status >= 500)  throw new Error(`CricAPI Server Error (HTTP ${res.status})`);
           if (!res.ok)           throw new Error(`HTTP ${res.status}`);
+          // First successful response after any 429s — reset the cooldown streak.
+          if (_cricApi429Streak > 0) {
+            _cricApi429Streak = 0;
+            _cricApi429Until = 0;
+          }
           const json = await res.json();
           // Server is the source of truth for quota — reconcile our local counter against
           // info.hitsToday so multi-tab / multi-device drift doesn't let us overrun the budget.
@@ -5278,6 +5274,8 @@
             .getElementById("logoutBtn")
             ?.addEventListener("click", () => {
               stopAR();
+              stopPreMatchXIWatcher();
+              if (window._xiPollTimer) { clearTimeout(window._xiPollTimer); window._xiPollTimer = null; }
               session = { name: null, isAdmin: false };
               sessionClear();
               history.replaceState({}, "", location.pathname);
@@ -7524,6 +7522,8 @@
             .getElementById("logoutBtn")
             ?.addEventListener("click", () => {
               stopAR();
+              stopPreMatchXIWatcher();
+              if (window._xiPollTimer) { clearTimeout(window._xiPollTimer); window._xiPollTimer = null; }
               session = { name: null, isAdmin: false };
               sessionClear();
               history.replaceState({}, "", location.pathname);
@@ -11465,7 +11465,7 @@
       }
       function showError(m) {
         document.getElementById("app").innerHTML =
-          `<div class="screen-center"><p style="color:#ef4444">${escAttr(m)}</p></div>`;
+          `<div class="screen-center"><div style="text-align:center;padding:24px"><p style="color:#ef4444;margin-bottom:16px">${escAttr(m)}</p><button onclick="location.reload()" style="background:var(--accent,#3b82f6);color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:14px">🔄 Reload</button></div></div>`;
       }
 
       /* ── Theme System ── */

@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.7** — [Changelog](#-changelog)
+**Current version: v3.15.8** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,19 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.8 — May 15, 2026
+**Audit follow-ups round 2: 429 backoff, XI watcher cleanup, helper extraction**
+
+Bundle of the remaining quick wins from the v3.15.6 audit. No rules change, no scoring change.
+
+- **CricAPI 429 cooldown (P2 #11).** `_cricFetch` previously threw on 429 with no cooldown — every poll within the next 30s also burned a call and got 429. Added module-scope `_cricApi429Until` + `_cricApi429Streak`; on 429, sets cooldown to 30s → 60s → 120s → 300s (cap), honors `Retry-After` header if present. Subsequent calls during cooldown throw fast without hitting the API. First success after any 429 resets the streak.
+- **XI watchers stop on logout (P2 #10).** Logout handler in both `bindMember` and `bindAdmin` only called `stopAR()` — the pre-match XI watcher (`window._xiPreMatchTimer`, 90s interval) and the manual fetch poll chain (`window._xiPollTimer`) kept running after logout, burning quota and writing into Firestore as a logged-out session. Both now cleared explicitly.
+- **`toRealOvers` floor instead of round (P2 #13).** `Math.round((val - full) * 10)` would inflate `3.45 → 4 balls`, distorting the economy denominator. Cricket overs are integer balls 0–5, never decimals — `Math.floor` preserves exactly what CricAPI sent.
+- **Booster apply/clear logic deduplicated (P2 #9).** Extracted the shared transaction (refund old + debit new + update match.teams.booster + save inventory, all atomic) into `_commitBoosterChange(activeMid, savedBooster, newBooster)`. Apply path passes both; clear path passes `newBooster=null`. ~85 → ~40 lines, single source of truth for booster-inventory math.
+- **`showError` has a Reload button (P3 UX).** Previously full-screen error with no recovery — refresh was the only escape. Now renders a `🔄 Reload` button.
+- **`update_credits.js` writes a backup (P3).** Before overwriting `ipl-fantasy-v4_render.html`, writes `ipl-fantasy-v4_render.html.bak`. Also returns non-zero on regex miss instead of silently logging and exiting 0.
+- **CLAUDE.md PIN deadline fixed.** Doc said `2026-05-15`; code says `2026-06-15` (`_PIN_LEGACY_DEADLINE`). Code is more lenient than the doc claimed — no user impact, but the drift is now corrected.
 
 ### v3.15.7 — May 15, 2026
 **Audit follow-ups: matchId escape + unmatched scorecard names surfaced**

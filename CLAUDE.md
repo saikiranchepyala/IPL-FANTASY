@@ -46,7 +46,7 @@ The JS is organized into logical sections separated by comment banners:
 - **`_cricFetch()`** (~line 1063): Central API wrapper with AbortController timeout (15s)
 - **`boot()`** (~line 1176): Entry point — anonymous auth → load game state → route to login/member/admin view
 - **Router** (~line 1386): URL param-based tab navigation (`?tab=`, `?atab=` for admin)
-- **PIN Hashing** (~line 1676): `hashPin()` (PBKDF2-SHA256, 600k iterations), `verifyPin()` with legacy plaintext auto-upgrade (deadline: 2026-05-15)
+- **PIN Hashing** (~line 1676): `hashPin()` (PBKDF2-SHA256, 600k iterations), `verifyPin()` with legacy plaintext auto-upgrade (deadline: 2026-06-15 — see `_PIN_LEGACY_DEADLINE`)
 - **Login/Join UI** (~line 1515): `doLogin()`, `doJoin()` with shared `validateName()` (blocks Firestore-unsafe chars `.[]#$/`)
 - **Member Tabs** (~line 1954): My Team, Live Scores, Season Table, Match History, Match Info (conditional)
 - **Admin Tabs** (~line 5008): Current Match management, Player Stats, admin controls
