@@ -168,7 +168,10 @@
        * 2. Ultra-strict word match (every meaningful word must exist)
        * 3. Initials fallback (V Kohli -> Virat Kohli) IF no other candidate exists
        */
-      const robustMatch = (raw, pool, nl, nlKeys) => {
+      // Optional 5th arg `_skippedSink` (Set): if a non-empty raw name fails to
+      // resolve to a pool player, the raw name is added so callers can surface
+      // "scorecard players we couldn't match" after their parse loop.
+      const robustMatch = (raw, pool, nl, nlKeys, _skippedSink) => {
         if (!raw) return null;
         const clean = raw
           .toLowerCase()
@@ -205,6 +208,7 @@
             console.warn(`[robustMatch] Initials collision: "${raw}" matched ${candidates.length} players. Skipping fallback.`);
           }
         }
+        if (_skippedSink) _skippedSink.add(raw.trim());
         return null;
       };
 
@@ -3652,7 +3656,7 @@
             const badge = isSeasonHigh ? " 👑" : isWinner ? " ★" : "";
             const shortLabel = (m.label || "").split(",")[0].substring(0, 12);
             if (m.matchId) {
-              return `<span class="sc-mpill sc-mpill-click${winTag}" onclick="viewMatchHistory('${m.matchId}')" title="${escAttr(m.label)}">${shortLabel}: <b>${m.pts}pts</b>${badge}</span>`;
+              return `<span class="sc-mpill sc-mpill-click${winTag}" onclick="viewMatchHistory(${escAttr(JSON.stringify(m.matchId))})" title="${escAttr(m.label)}">${shortLabel}: <b>${m.pts}pts</b>${badge}</span>`;
             }
             return `<span class="sc-mpill${winTag}" title="${escAttr(m.label)}">${shortLabel}: <b>${m.pts}pts</b>${badge}</span>`;
           })
@@ -4148,8 +4152,8 @@
                   cached?.t2img || (t2Key ? IPL_TEAM_LOGOS[t2Key] : "");
                 const _fn =
                   session.isAdmin && !session.name
-                    ? `openAdminMatchSummary('${m.matchId}')`
-                    : `openMatchSummary('${m.matchId}')`;
+                    ? `openAdminMatchSummary(${escAttr(JSON.stringify(m.matchId))})`
+                    : `openMatchSummary(${escAttr(JSON.stringify(m.matchId))})`;
                 return `<div class="hlist-card" onclick="${_fn}">
                 <div class="hlc-logos">
                   ${t1img ? `<img loading="lazy" decoding="async" src="${escAttr(t1img)}" class="hlc-logo" onerror="this.style.display='none'">` : '<div class="hlc-logo-ph"></div>'}
@@ -6870,10 +6874,11 @@
           bowlAcc = {},
           catchAcc = {};
         const statsUpdate = {};
+        const _skippedNames = new Set();
 
         sc.forEach((inn) => {
           (inn.batting || []).forEach((b) => {
-            const m = robustMatch(b.batsman?.name || b.name || "", pool, nl, nlKeys);
+            const m = robustMatch(b.batsman?.name || b.name || "", pool, nl, nlKeys, _skippedNames);
             if (!m) return;
             const n = nl[m];
             const balls = b.b || 0,
@@ -6904,7 +6909,7 @@
             if (dt) batAcc[n].dismissalText = dt;
           });
           (inn.bowling || []).forEach((bw) => {
-            const m = robustMatch(bw.bowler?.name || bw.name || "", pool, nl, nlKeys);
+            const m = robustMatch(bw.bowler?.name || bw.name || "", pool, nl, nlKeys, _skippedNames);
             if (!m) return;
             const n = nl[m];
             if (!bowlAcc[n])
@@ -6932,7 +6937,7 @@
           });
           (inn.catching || []).forEach((c) => {
             if (c.catcher?.name) {
-              const mC = robustMatch(c.catcher.name, pool, nl, nlKeys);
+              const mC = robustMatch(c.catcher.name, pool, nl, nlKeys, _skippedNames);
               if (mC) {
                 const nC = nl[mC];
                 if (!catchAcc[nC])
@@ -6947,7 +6952,7 @@
               }
             }
             if (c.bowler?.name && (c.lbw || c.bowled)) {
-              const mB = robustMatch(c.bowler.name, pool, nl, nlKeys);
+              const mB = robustMatch(c.bowler.name, pool, nl, nlKeys, _skippedNames);
               if (mB) {
                 const nB = nl[mB];
                 if (!bowlAcc[nB])
@@ -7070,6 +7075,12 @@
           toast(
             `✅ JSON parsed — ${updated} players updated. Auto-poll paused for 5 min — hit Save All to confirm.`,
           );
+          if (_skippedNames.size > 0) {
+            const list = [..._skippedNames].slice(0, 5).join(", ");
+            const more = _skippedNames.size > 5 ? ` (+${_skippedNames.size - 5} more)` : "";
+            console.warn(`[parseJsonScorecard] ${_skippedNames.size} scorecard player(s) not matched to local roster:`, [..._skippedNames]);
+            toast(`⚠️ ${_skippedNames.size} scorecard name(s) unmatched: ${list}${more}`, "err");
+          }
           document.getElementById("pasteJsonScorecardBox").value = "";
           const grid = document.getElementById("statsGrid");
           if (grid) {
@@ -9948,6 +9959,11 @@
           return;
         }
 
+        // Collected raw player names from the API scorecard that didn't resolve to
+        // any local roster entry. Surfaced once per poll so admins notice when a
+        // scorecard column has been silently dropped (typo, missing player, etc.).
+        const _pollSkippedNames = new Set();
+
         // Strip stats.* keys from an update payload if the manual-edit lock is still
         // active on this match. Returns the number of keys stripped.
         const _stripIfManualLocked = (update) => {
@@ -10081,7 +10097,7 @@
 
           if (starters.length >= 11) {
             apiPlayers.forEach((p) => {
-              const m = robustMatch(p.name, matchPlayers, nl, nlKeys);
+              const m = robustMatch(p.name, matchPlayers, nl, nlKeys, _pollSkippedNames);
               if (!m) return;
               const n = nl[m];
               const isStarter = p.status === "playing";
@@ -10132,7 +10148,7 @@
 
             if (xiFromScorecard.size >= 11 || (anyBallBowled && xiFromScorecard.size > 0)) {
               xiFromScorecard.forEach((rawName) => {
-                const m = robustMatch(rawName, matchPlayers, nl, nlKeys);
+                const m = robustMatch(rawName, matchPlayers, nl, nlKeys, _pollSkippedNames);
                 if (!m) return;
                 const n = nl[m];
                 const currentStatus = activeMatchData?.playerStatus?.[n];
@@ -10262,7 +10278,7 @@
           sc.forEach((inn) => {
             (inn.batting || []).forEach((b) => {
               const raw = (b.batsman?.name || b.name || "").trim();
-              const m = robustMatch(raw, matchPlayers, nl, nlKeys);
+              const m = robustMatch(raw, matchPlayers, nl, nlKeys, _pollSkippedNames);
               if (!m) return;
               const n = nl[m];
 
@@ -10312,7 +10328,7 @@
             });
             (inn.bowling || []).forEach((bw) => {
               const raw = (bw.bowler?.name || bw.name || "").trim();
-              const m = robustMatch(raw, matchPlayers, nl, nlKeys);
+              const m = robustMatch(raw, matchPlayers, nl, nlKeys, _pollSkippedNames);
               if (!m) return;
               const n = nl[m];
               if (!bowlAcc[n])
@@ -10343,7 +10359,7 @@
               // 1. Check Catcher for Catches/Stumpings/Runouts
               if (c.catcher?.name) {
                 const rawC = c.catcher.name.trim();
-                const mC = robustMatch(rawC, matchPlayers, nl, nlKeys);
+                const mC = robustMatch(rawC, matchPlayers, nl, nlKeys, _pollSkippedNames);
                 if (mC) {
                   const nC = nl[mC];
                   if (!catchAcc[nC])
@@ -10360,7 +10376,7 @@
               // 2. Check Bowler for LBW/Bowled points
               if (c.bowler?.name && (c.lbw || c.bowled)) {
                 const rawB = c.bowler.name.trim();
-                const mB = robustMatch(rawB, matchPlayers, nl, nlKeys);
+                const mB = robustMatch(rawB, matchPlayers, nl, nlKeys, _pollSkippedNames);
                 if (mB) {
                   const nB = nl[mB];
                   if (!bowlAcc[nB])
@@ -10749,6 +10765,15 @@
             if (showFeedback) {
               if (updated > 0) toast(`✓ Stats updated for ${updated} entries`);
               else toast("✓ Match status synced");
+            }
+
+            if (_pollSkippedNames.size > 0) {
+              console.warn(`[Poller] ${_pollSkippedNames.size} scorecard player(s) not matched to local roster for ${activeMid}:`, [..._pollSkippedNames]);
+              if (showFeedback) {
+                const list = [..._pollSkippedNames].slice(0, 5).join(", ");
+                const more = _pollSkippedNames.size > 5 ? ` (+${_pollSkippedNames.size - 5} more)` : "";
+                toast(`⚠️ ${_pollSkippedNames.size} scorecard name(s) unmatched: ${list}${more}`, "err");
+              }
             }
 
             // ── Master Pulse: surgical Live Stats DOM patch ──

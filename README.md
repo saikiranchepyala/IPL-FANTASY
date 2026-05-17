@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.6** — [Changelog](#-changelog)
+**Current version: v3.15.7** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,16 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.7 — May 15, 2026
+**Audit follow-ups: matchId escape + unmatched scorecard names surfaced**
+
+Two of the remaining items from the v3.15.6 audit shipped together.
+
+- **matchId interpolations escaped (P2).** Two `onclick` handlers — `viewMatchHistory('${m.matchId}')` (season-table per-match pill) and `openMatchSummary` / `openAdminMatchSummary` (History tab card) — interpolated the matchId without escaping. Source is currently trusted (Firestore `season/totals` populated by `finalizeMatch`), but the documented anonymous-auth rules limitation means a determined member could write a crafted matchId. Replaced with the `escAttr(JSON.stringify(...))` pattern already used elsewhere — closes the only residual XSS gap from the audit.
+- **Unmatched scorecard names surfaced (P2).** `robustMatch` returned `null` silently when a CricAPI scorecard player couldn't be resolved to the local roster, so admins had no signal that a column was being dropped. Added an optional `_skippedSink` Set parameter on `robustMatch`; both parsers (manual JSON paste in `parseJsonScorecard`, live poller in `autoFetchStats`) now collect the raw unmatched names. Manual paste toasts the names directly (`⚠️ N scorecard name(s) unmatched: ...`); auto-poll logs to console always and toasts on manual `⚡ Fetch Now` clicks (`showFeedback=true`) to avoid spamming background polls. Single-call lookup inside the economy `inningsCount` filter intentionally doesn't track (it's a roster check, not a parse).
+
+No rules change; no scoring change. Per-player rounding before the booster multiplier (P1 #5 from the audit) was reviewed and left as-is — intentional convention, matches Dream11 / DraftKings.
 
 ### v3.15.6 — May 15, 2026
 **Manual-edit lock — auto-poll no longer overwrites admin paste / Save All**
