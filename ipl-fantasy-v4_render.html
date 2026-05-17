@@ -1291,6 +1291,10 @@
       const _prevTossResultByMid = {}; // last-seen tossResult per mid for transition detection
       const _lastAutoFetchAt = {}; // mid → ms timestamp; coalesce duplicate background polls
       const AUTOFETCH_MIN_INTERVAL_MS = 30000; // 30s — skips background polls within this window
+      // Window (ms) during which auto-poll must NOT overwrite stats.* keys after an admin
+      // manual edit (Parse JSON / Save All). Persisted on the match doc so a different
+      // admin's tab also honors it. Auto-expires; no manual unlock needed.
+      const MANUAL_STATS_LOCK_MS = 5 * 60 * 1000;
       let _lastAmbientMid = null; // cache to skip redundant injectTeamAmbient calls
       let _refreshTimer = null; // debounce handle for refreshView → _doRefresh
 
@@ -7061,9 +7065,10 @@
 
         try {
           skipNextRefresh = true;
+          statsUpdate["_manualStatsLockUntil"] = Date.now() + MANUAL_STATS_LOCK_MS;
           await updateDoc(doc(db, "matches", activeMid), statsUpdate);
           toast(
-            `✅ JSON parsed — ${updated} players updated. Hit Save All to confirm.`,
+            `✅ JSON parsed — ${updated} players updated. Auto-poll paused for 5 min — hit Save All to confirm.`,
           );
           document.getElementById("pasteJsonScorecardBox").value = "";
           const grid = document.getElementById("statsGrid");
@@ -8268,8 +8273,9 @@
           Object.entries(playerStats).forEach(([p, s]) => {
             statsUpdate[`stats.${p}`] = s;
           });
+          statsUpdate["_manualStatsLockUntil"] = Date.now() + MANUAL_STATS_LOCK_MS;
           await updateDoc(doc(db, "matches", activeMid), statsUpdate);
-          toast(`✓ All player stats saved!`);
+          toast(`✓ All player stats saved! Auto-poll paused for 5 min.`);
           // Refresh grid to show updated points
           const grid = document.getElementById("statsGrid");
           if (grid) {
@@ -9942,6 +9948,25 @@
           return;
         }
 
+        // Strip stats.* keys from an update payload if the manual-edit lock is still
+        // active on this match. Returns the number of keys stripped.
+        const _stripIfManualLocked = (update) => {
+          const lockUntil = activeMatchData?._manualStatsLockUntil || 0;
+          if (Date.now() >= lockUntil) return 0;
+          let stripped = 0;
+          for (const k of Object.keys(update)) {
+            if (k.startsWith("stats.")) {
+              delete update[k];
+              stripped++;
+            }
+          }
+          if (stripped > 0) {
+            const remainingS = Math.ceil((lockUntil - Date.now()) / 1000);
+            console.log(`[Poller] Manual-edit lock active (${remainingS}s left) — dropped ${stripped} stats.* keys for ${activeMid}`);
+          }
+          return stripped;
+        };
+
         const mid = activeMatchData?.liveMatchId;
 
         if (!mid) {
@@ -10142,10 +10167,13 @@
 
           // Commit XI updates immediately
           if (Object.keys(statsUpdate).length > 0) {
-            await updateDoc(doc(db, "matches", activeMid), statsUpdate);
-            console.log(
-              `[Poller] Committed XI/Status updates for ${activeMid}`,
-            );
+            _stripIfManualLocked(statsUpdate);
+            if (Object.keys(statsUpdate).length > 0) {
+              await updateDoc(doc(db, "matches", activeMid), statsUpdate);
+              console.log(
+                `[Poller] Committed XI/Status updates for ${activeMid}`,
+              );
+            }
             // Clear processed updates to avoid redundant writes below
             Object.keys(statsUpdate).forEach((k) => delete statsUpdate[k]);
           }
@@ -10683,6 +10711,14 @@
               console.log(
                 "[Poller] No changes detected in scorecard. Skipping Firestore write.",
               );
+              if (ended && !activeMatchData?.finalized) {
+                _handleMatchEnd(activeMid);
+              }
+              return;
+            }
+
+            _stripIfManualLocked(statsUpdate);
+            if (Object.keys(statsUpdate).length === 0) {
               if (ended && !activeMatchData?.finalized) {
                 _handleMatchEnd(activeMid);
               }

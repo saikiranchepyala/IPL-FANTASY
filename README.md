@@ -4,7 +4,7 @@ A private, self-hosted IPL fantasy league web app for friend groups. Built as a 
 
 > Pick your XI before every match, choose your Captain & Vice-Captain, play a Booster, and watch the leaderboard update live as the match unfolds. Teams are hidden until the match locks — then revealed simultaneously for everyone.
 
-**Current version: v3.15.5** — [Changelog](#-changelog)
+**Current version: v3.15.6** — [Changelog](#-changelog)
 
 ## 🛡️ Security & Known Limitations
 
@@ -293,6 +293,16 @@ Firebase will connect to your live Firestore instance, so any changes made local
 ---
 
 ## 📋 Changelog
+
+### v3.15.6 — May 15, 2026
+**Manual-edit lock — auto-poll no longer overwrites admin paste / Save All**
+
+Race condition surfaced during the audit: both `autoFetchStats` (every ~60s) and the admin's manual `Parse JSON` / `Save All` paths wrote to `stats.<player>` on the same match doc with no coordination. If admin pasted a corrected scorecard and the next poll fired within seconds, fresh API data silently overwrote the correction.
+
+- **`parseJsonScorecard` and `saveAllStats`** now stamp `_manualStatsLockUntil = Date.now() + 5 min` on the match doc, atomically with the stats write.
+- **`autoFetchStats`** added a `_stripIfManualLocked()` helper applied at both write sites (the XI/status commit and the main stats commit). When the lock is active, it strips every `stats.*` key from the update; non-stats fields (`score`, `matchStatus`, `currentBatsmen`, `currentBowler`, `playerStatus`, `xiReady`, `matchEnded`, `overSummaries`, auto-lock) still flow through so the live UI stays current.
+- **Lock auto-expires** after 5 min — no manual unlock UI, no cleanup job. The timestamp is persisted on the match doc so admins in other tabs honor it too.
+- **`firestore.rules`**: `_manualStatsLockUntil` added to the `/matches/{matchId}` `affectedKeys` whitelist. **Deploy rules FIRST, then HTML** — this is a loosening change, so old clients are unaffected by rules going live early, but the new HTML would be rejected if rules lag behind.
 
 ### v3.15.5 — May 9, 2026
 **Match-day polish: scorecard dismissals, history sort, fetch feedback**

@@ -29,7 +29,8 @@ service cloud.firestore {
           'currentBowler', 'matchResult', 'abandoned', 'finalized',
           'tossResult', 'overSummaries', 'label', 'liveMatchId',
           't1', 't2', 't1img', 't2img', 'isIPL', 'matchType',
-          'matchNum', 'fantasyEnabled', 'createdAt', 'venue'
+          'matchNum', 'fantasyEnabled', 'createdAt', 'venue',
+          '_manualStatsLockUntil'
         ])
       );
     }
